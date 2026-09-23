@@ -26,6 +26,19 @@ DEFAULT_BENCHMARK_ORDER = [
     "zarr s3 force no consolidated",
 ]
 
+NETWORK_METRIC_LABELS = {
+    "amount_downloaded_in_bytes": "Downloaded bytes",
+    "amount_downloaded_in_number_of_packets": "Downloaded packets",
+    "amount_uploaded_in_bytes": "Uploaded bytes",
+    "amount_uploaded_in_number_of_packets": "Uploaded packets",
+    "mean_time_per_web_packet": "Mean time per web packet (s)",
+    "network_total_time_in_seconds": "Network total time (s)",
+    "total_traffic_in_number_of_web_requests": "Total web requests",
+    "total_transfer_in_bytes": "Total transfer bytes",
+    "total_transfer_in_number_of_packets": "Total transfer packets",
+    "total_transfer_time_in_seconds": "Total transfer time (s)",
+}
+
 
 class BenchmarkVisualizer:
     """Handles plotting and visualization of benchmark results."""
@@ -232,9 +245,17 @@ class BenchmarkVisualizer:
         palette: str = "Paired",
         catplot_kwargs: Optional[Dict[str, Any]] = None,
         caption: str = None,
+        xlabel: str = "Time (s)",
+        row_xlabels: Optional[Dict[str, str]] = None,
     ):
         """Create distribution plot for benchmarks."""
         catplot_kwargs = catplot_kwargs or {}
+        if metric_order is not None:
+            # Keep only the explicitly requested benchmark methods. Seaborn's ``order`` controls
+            # the displayed category order, but filtering here prevents unintended methods from
+            # leaking into annotations, legends, or future plot/statistics code paths.
+            df = df[df[group].isin(metric_order)]
+
         if df.empty:
             warnings.warn(f"Warning: No data available to plot for {filename}. Skipping plot.")
             return
@@ -257,7 +278,12 @@ class BenchmarkVisualizer:
         if add_annotations:
             g.map_dataframe(self._add_mean_std_annotations, value="value", group=group, order=metric_order)
 
-        g.set(xlabel="Time (s)", ylabel=df["benchmark_name_label"].iloc[0])
+        g.set(xlabel=xlabel, ylabel=df["benchmark_name_label"].iloc[0])
+        if row is not None and row_xlabels is not None:
+            for row_index, row_name in enumerate(g.row_names):
+                row_xlabel = row_xlabels.get(row_name, xlabel)
+                for ax in g.axes[row_index, :]:
+                    ax.set_xlabel(row_xlabel)
 
         for ax in g.axes.flat:
             wrapped_title = "\n".join(textwrap.wrap(ax.get_title(), width=50))
@@ -286,6 +312,12 @@ class BenchmarkVisualizer:
         caption=None,
     ):
         """Plot benchmark performance vs slice size."""
+        if metric_order is not None:
+            # Keep only the explicitly requested benchmark methods. Seaborn's ``hue_order``
+            # controls display order, but filtering here makes the plotted dataset auditable and
+            # prevents unintended methods from affecting future plot/statistics code paths.
+            df = df[df[group].isin(metric_order)]
+
         if df.empty:
             warnings.warn(f"Warning: No data available to plot for {filename}. Skipping plot.")
             return
@@ -349,7 +381,7 @@ class BenchmarkVisualizer:
 
         # Add network tracking specific options
         if network_tracking:
-            base_kwargs.update({"row": "variable", "sharex": "row"})
+            base_kwargs.update({"row": "variable", "sharex": "row", "row_xlabels": NETWORK_METRIC_LABELS})
 
         # Plot box plot
         self.plot_benchmark_dist(**base_kwargs)
@@ -598,9 +630,10 @@ class BenchmarkVisualizer:
         for (modality, benchmark_name, is_preloaded), remote_group in collected_stream.group_by(
             ["modality", group, row]
         ):
+            format_family = benchmark_name.split(" ")[0]
             local_group = download_df.filter(
                 (pl.col("modality") == modality)
-                & (pl.col(group) == f"{benchmark_name.split(' ')[0]} ")
+                & (pl.col("format_family") == format_family)
                 & (pl.col(row) == is_preloaded)
             ).collect()
             # TODO - for all modalities (specifically icephys) add an additional figure that takes the longest slice range and multiply those times
@@ -690,7 +723,7 @@ class BenchmarkVisualizer:
         """Plot performance changes over time for a given benchmark type."""
         print(f"Plotting performance over time")
 
-        df = db.join_results_with_environments()
+        df = db.filter_results_for_environment_timepoints()
         df = (
             df.filter(pl.col("benchmark_name_type") == benchmark_type)
             .filter(pl.col("benchmark_name_clean").is_in(self.pynwb_read_order))
@@ -745,8 +778,10 @@ class BenchmarkVisualizer:
 
         # Network tracking analysis
         benchmark_type = "network_tracking_remote_file_reading"
-        self.plot_read_benchmarks(db, order=self.file_open_order, benchmark_type=benchmark_type, network_tracking=True)
-        self.plot_read_benchmarks(db, benchmark_type=benchmark_type, network_tracking=True, suffix="pynwb")
+        self.plot_read_benchmarks(
+            db, order=self.file_open_order, benchmark_type=benchmark_type, network_tracking=True, suffix=""
+        )
+        self.plot_read_benchmarks(db, benchmark_type=benchmark_type, network_tracking=True, suffix="_pynwb")
         self.plot_slice_benchmarks(db, benchmark_type="network_tracking_remote_slicing", network_tracking=True)
 
         # Method rankings
