@@ -50,14 +50,19 @@ class BenchmarkVisualizer:
     download_order = ["hdf5 dandi api", "zarr dandi api", "lindi dandi api"]
     # TODO - where does lindi local json value go / what should it be called
 
-    def __init__(self, output_directory: Optional[Path] = None):
+    def __init__(self, output_directory: Optional[Path] = None, summary_tables_directory: Optional[Path] = None):
         """Initialize visualizer with output directory.
 
         Args:
             output_directory: Directory for saving figures
+            summary_tables_directory: Directory for optional CSV summary tables. If not provided, no summary tables
+                are written.
         """
         self.output_directory = output_directory or Path(__file__).parent / "figures"
         self.output_directory.mkdir(parents=True, exist_ok=True)
+        self.summary_tables_directory = Path(summary_tables_directory) if summary_tables_directory is not None else None
+        if self.summary_tables_directory is not None:
+            self.summary_tables_directory.mkdir(parents=True, exist_ok=True)
         self._setup_matplotlib()
 
     @staticmethod
@@ -114,6 +119,33 @@ class BenchmarkVisualizer:
         plot_kwargs.update(extra_kwargs)
 
         return plot_kwargs
+
+    def _write_summary_table(
+        self,
+        df: pd.DataFrame,
+        group_cols: List[str],
+        value_col: str,
+        filename: str,
+    ) -> None:
+        """Write a grouped CSV summary table if summary table output is enabled."""
+        if self.summary_tables_directory is None:
+            return
+
+        if df.empty:
+            warnings.warn(f"No data available for summary table {filename}. Skipping table.")
+            return
+
+        missing_cols = [col for col in [*group_cols, value_col] if col not in df.columns]
+        if missing_cols:
+            warnings.warn(f"Cannot write summary table {filename}; missing columns: {missing_cols}.")
+            return
+
+        summary_df = (
+            df.groupby(group_cols, dropna=False)[value_col]
+            .agg(n="count", mean="mean", median="median", std="std", min="min", max="max")
+            .reset_index()
+        )
+        summary_df.to_csv(self.summary_tables_directory / filename, index=False)
 
     @staticmethod
     def _add_annotations_df(intersections_df: pl.DataFrame, order: List[str], **kwargs):
@@ -370,11 +402,12 @@ class BenchmarkVisualizer:
             f"Benchmark execution times across different methods and modalities{caption_suffix}"
             "Text annotations, if present, display mean ± standard deviation and sample size (n). "
         )
+        figure_filename = self.output_directory / f"{prefix}file_open{suffix}.pdf"
         base_kwargs = self._create_plot_kwargs(
             df=filtered_df.to_pandas(),
             group=col_name,
             order=self.pynwb_read_order if order is None else order,
-            filename=self.output_directory / f"{prefix}file_open{suffix}.pdf",
+            filename=figure_filename,
             kind=kind,
             caption=caption,
         )
@@ -382,6 +415,16 @@ class BenchmarkVisualizer:
         # Add network tracking specific options
         if network_tracking:
             base_kwargs.update({"row": "variable", "sharex": "row", "row_xlabels": NETWORK_METRIC_LABELS})
+            summary_group_cols = ["benchmark_name_type", "variable", col_name, "modality"]
+        else:
+            summary_group_cols = ["benchmark_name_type", col_name, "modality"]
+
+        self._write_summary_table(
+            df=base_kwargs["df"],
+            group_cols=summary_group_cols,
+            value_col="value",
+            filename=f"{figure_filename.stem}_summary.csv",
+        )
 
         # Plot box plot
         self.plot_benchmark_dist(**base_kwargs)
@@ -431,13 +474,31 @@ class BenchmarkVisualizer:
                     "row_xlabels": NETWORK_METRIC_LABELS,
                 }
             )
+            summary_group_cols = ["benchmark_name_type", "slice_number", "variable", col_name, "modality"]
+        else:
+            summary_group_cols = ["benchmark_name_type", "slice_number", "is_preloaded", col_name, "modality"]
+
+        summary_df = base_kwargs["df"].to_pandas() if isinstance(base_kwargs["df"], pl.DataFrame) else base_kwargs["df"]
+        self._write_summary_table(
+            df=summary_df,
+            group_cols=summary_group_cols,
+            value_col="value",
+            filename=f"{prefix}slicing_summary.csv",
+        )
 
         # Plot box plot for each slice value
         for slice_num, slice_df in enumerate(base_kwargs["df"].partition_by("slice_number")):
+            figure_filename = self.output_directory / f"{prefix}slicing_range{slice_num}.pdf"
+            self._write_summary_table(
+                df=slice_df.to_pandas(),
+                group_cols=summary_group_cols,
+                value_col="value",
+                filename=f"{Path(figure_filename).stem}_summary.csv",
+            )
             base_kwargs.update(
                 {
                     "df": slice_df.to_pandas(),
-                    "filename": self.output_directory / f"{prefix}slicing_range{slice_num}.pdf",
+                    "filename": figure_filename,
                     "caption": (
                         f"Benchmark execution times across different methods and modalities for slice data (range = {slice_num})."
                         "Text annotations, if present, display mean ± standard deviation and sample size (n). "
@@ -519,6 +580,10 @@ class BenchmarkVisualizer:
         print("Plotting download vs stream benchmark comparison...")
         prefix = self._get_filename_prefix(network_tracking)
         base_filename = self.output_directory / f"{prefix}slicing"
+        remote_read_figure_filename = Path(f"{base_filename}_with_remote_read.pdf")
+        remote_range_figure_filename = Path(f"{base_filename}_range.pdf")
+        local_read_figure_filename = Path(f"{base_filename}_with_local_read.pdf")
+        extrapolation_figure_filename = Path(f"{base_filename}_with_extrapolation.pdf")
         plot_kwargs = {
             "group": "benchmark_name_clean",
             "row": "variable" if network_tracking else "is_preloaded",
@@ -529,11 +594,24 @@ class BenchmarkVisualizer:
         remote_slice_and_read_df = db.combine_read_and_slice_times(
             read_col_name="time_remote_file_reading", slice_col_name="time_remote_slicing", with_baseline=True
         )
+        remote_slice_and_read_pdf = remote_slice_and_read_df.collect().to_pandas()
+        self._write_summary_table(
+            df=remote_slice_and_read_pdf,
+            group_cols=["slice_number", "is_preloaded", "benchmark_name_clean", "modality"],
+            value_col="total_time",
+            filename=f"{remote_read_figure_filename.stem}_summary.csv",
+        )
+        self._write_summary_table(
+            df=remote_slice_and_read_pdf,
+            group_cols=["slice_number", "is_preloaded", "benchmark_name_clean", "modality"],
+            value_col="value",
+            filename=f"{remote_range_figure_filename.stem}_summary.csv",
+        )
         self.plot_benchmark_slices_vs_time(
-            df=remote_slice_and_read_df.collect().to_pandas(),
+            df=remote_slice_and_read_pdf,
             metric_order=self.pynwb_read_order if order is None else order,
             y_value="total_time",  # includes file read + slice time
-            filename=f"{base_filename}_with_remote_read.pdf",
+            filename=remote_read_figure_filename,
             caption=(
                 "Performance trends as a function of data slice size. "
                 "Data points indicate combined file open + slice times when streaming data remotely. "
@@ -543,10 +621,10 @@ class BenchmarkVisualizer:
         )
 
         self.plot_benchmark_slices_vs_time(
-            df=remote_slice_and_read_df.collect().to_pandas(),
+            df=remote_slice_and_read_pdf,
             metric_order=self.pynwb_read_order if order is None else order,
             y_value="value",  # does not include file read time, only slice time
-            filename=f"{base_filename}_range.pdf",
+            filename=remote_range_figure_filename,
             caption=(
                 "Performance trends as a function of data slice size. "
                 "Data points include slice time only when streaming data remotely. "
@@ -558,11 +636,18 @@ class BenchmarkVisualizer:
         local_slice_and_read_df = db.combine_read_and_slice_times(
             read_col_name="time_local_file_reading", slice_col_name="time_local_slicing", with_baseline=True
         )
+        local_slice_and_read_pdf = local_slice_and_read_df.collect().to_pandas()
+        self._write_summary_table(
+            df=local_slice_and_read_pdf,
+            group_cols=["slice_number", "is_preloaded", "benchmark_name_clean", "modality"],
+            value_col="total_time",
+            filename=f"{local_read_figure_filename.stem}_summary.csv",
+        )
         self.plot_benchmark_slices_vs_time(
-            df=local_slice_and_read_df.collect().to_pandas(),
+            df=local_slice_and_read_pdf,
             metric_order=None,
             y_value="total_time",  # includes file read + slice time
-            filename=f"{base_filename}_with_local_read.pdf",
+            filename=local_read_figure_filename,
             caption=(
                 "Performance trends as a function of data slice size. "
                 "Data points indicate combined file open + slice times when accessing local data. "
@@ -577,10 +662,17 @@ class BenchmarkVisualizer:
         download_slice_and_read_df = db.combine_download_read_and_slice_times(
             read_col_name="time_local_file_reading", slice_col_name="time_local_slicing", with_baseline=True
         )
+        download_slice_and_read_pdf = download_slice_and_read_df.collect().to_pandas()
+        self._write_summary_table(
+            df=download_slice_and_read_pdf,
+            group_cols=["slice_number", "is_preloaded", "benchmark_name_clean", "modality"],
+            value_col="total_time",
+            filename=f"{extrapolation_figure_filename.stem}_download_summary.csv",
+        )
         self.plot_benchmark_slice_extrapolations(
             stream_df=remote_slice_and_read_df,
             download_df=download_slice_and_read_df,
-            filename=f"{base_filename}_with_extrapolation.pdf",
+            filename=extrapolation_figure_filename,
             caption=(
                 "Linear extrapolation comparing streaming vs. download approaches. "
                 "Solid lines show streaming performance (remote open + slice), dashed lines show download performance (download + local open + slice). "
@@ -677,17 +769,41 @@ class BenchmarkVisualizer:
 
         slice_df = db.filter_tests("time_remote_slicing")
         read_df = db.filter_tests("time_remote_file_reading")
+        read_h5py_df = read_df.filter(pl.col("benchmark_name_clean").is_in(self.file_open_order))
+        read_pynwb_df = read_df.filter(pl.col("benchmark_name_clean").is_in(self.pynwb_read_order))
+        slice_largest_df = slice_df.filter(pl.col("benchmark_name_clean").is_in(self.pynwb_read_order)).filter(
+            pl.col("slice_number") == 5
+        )
+
+        self._write_summary_table(
+            df=read_h5py_df.collect().to_pandas(),
+            group_cols=["benchmark_name_type", "benchmark_name_clean", "modality"],
+            value_col="value",
+            filename="method_rankings_heatmap_remote_file_open_summary.csv",
+        )
+        self._write_summary_table(
+            df=read_pynwb_df.collect().to_pandas(),
+            group_cols=["benchmark_name_type", "benchmark_name_clean", "modality"],
+            value_col="value",
+            filename="method_rankings_heatmap_remote_file_open_pynwb_summary.csv",
+        )
+        self._write_summary_table(
+            df=slice_largest_df.collect().to_pandas(),
+            group_cols=["benchmark_name_type", "slice_number", "is_preloaded", "benchmark_name_clean", "modality"],
+            value_col="value",
+            filename="method_rankings_heatmap_remote_slicing_largest_range_summary.csv",
+        )
 
         fig, axes = plt.subplots(3, 1, figsize=(8, 16))
         axes[0] = self.plot_benchmark_heatmap(
-            df=read_df.filter(pl.col("benchmark_name_clean").is_in(self.file_open_order)),
+            df=read_h5py_df,
             ax=axes[0],
             title="Remote File Opening",
             vmin=0,
             vmax=4,
         )
         axes[1] = self.plot_benchmark_heatmap(
-            df=read_df.filter(pl.col("benchmark_name_clean").is_in(self.pynwb_read_order)),
+            df=read_pynwb_df,
             ax=axes[1],
             title="Remote File Opening - PyNWB",
             vmin=0,
@@ -695,11 +811,7 @@ class BenchmarkVisualizer:
         )
         # plot only largest slice range for clarity
         axes[2] = self.plot_benchmark_heatmap(
-            df=(
-                slice_df.filter(pl.col("benchmark_name_clean").is_in(self.pynwb_read_order)).filter(
-                    pl.col("slice_number") == 5
-                )
-            ),  # NOTE - if updating, also update caption in plot_benchmark_heatmap
+            df=slice_largest_df,  # NOTE - if updating, also update caption in plot_benchmark_heatmap
             ax=axes[2],
             title="Remote Slicing",
             vmin=0,
@@ -743,6 +855,23 @@ class BenchmarkVisualizer:
                 f"Warning: No data available to plot for performance_over_{benchmark_type}.pdf. Skipping plot."
             )
             return
+
+        summary_group_cols = [
+            "benchmark_name_type",
+            "environment_timepoint",
+            "package_name",
+            "package_version",
+            "benchmark_name_clean",
+            "modality",
+        ]
+        if benchmark_type == "time_remote_slicing":
+            summary_group_cols.append("is_preloaded")
+        self._write_summary_table(
+            df=df,
+            group_cols=summary_group_cols,
+            value_col="value",
+            filename=f"performance_over_{benchmark_type}_summary.csv",
+        )
 
         g = sns.catplot(
             data=df,

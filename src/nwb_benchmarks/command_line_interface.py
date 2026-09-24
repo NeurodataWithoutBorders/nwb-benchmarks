@@ -76,7 +76,8 @@ def generate_figures_command(args: argparse.Namespace) -> None:
     db.create_database()
 
     # Initialize visualizer and generate plots
-    visualizer = BenchmarkVisualizer(output_directory=output_dir)
+    summary_tables_dir = pathlib.Path(args.summary_tables_dir) if args.summary_tables_dir else None
+    visualizer = BenchmarkVisualizer(output_directory=output_dir, summary_tables_directory=summary_tables_dir)
     visualizer.plot_all(db)
 
 
@@ -216,6 +217,11 @@ def main() -> None:
             "--exclude-older",
             type=str,
             help="Exclude results older than this date (format: YYYY-MM-DD, default: '2025-11-01')",
+        )
+        parser.add_argument(
+            "--summary-tables-dir",
+            type=str,
+            help="Optional directory for CSV summary tables aligned with the generated figures. If omitted, no summary tables are written.",
         )
 
         args = parser.parse_args(sys.argv[2:])
