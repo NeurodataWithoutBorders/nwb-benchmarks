@@ -33,7 +33,7 @@ NETWORK_METRIC_LABELS = {
     "amount_uploaded_in_number_of_packets": "Uploaded packets",
     "mean_time_per_web_packet": "Mean time per web packet (s)",
     "network_total_time_in_seconds": "Network total time (s)",
-    "total_traffic_in_number_of_web_packets": "Web-packet proxy count",
+    "total_traffic_in_number_of_web_packets": "Total web packets",
     "total_transfer_in_bytes": "Total transfer bytes",
     "total_transfer_in_number_of_packets": "Total transfer packets",
     "total_transfer_time_in_seconds": "Total transfer time (s)",
