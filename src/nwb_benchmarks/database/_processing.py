@@ -288,17 +288,37 @@ class BenchmarkDatabase:
             read_col_name=read_col_name, slice_col_name=slice_col_name, with_baseline=with_baseline
         )
 
-        return local_read_and_slice_df.join(
-            download_df.with_columns(
-                pl.col("benchmark_name_clean").str.replace("dandi api", "pynwb").alias("benchmark_name_clean")
-            )
-            .group_by(["modality", "benchmark_name_clean"])
-            .agg(pl.col("value").mean().alias("avg_download_time")),
-            on=["modality", "benchmark_name_clean"],
-            how="left",
-        ).with_columns(
+        # Match download benchmarks to the local PyNWB read/slice benchmarks without
+        # overwriting benchmark_name_clean. Download benchmarks are named like
+        # "hdf5 dandi api" and "zarr dandi api", while the comparable local slicing
+        # benchmarks are named "hdf5 pynwb" and "zarr pynwb". A dedicated match column
+        # preserves the original labels and avoids relying on trailing spaces in plots.
+        local_read_and_slice_df = local_read_and_slice_df.with_columns(
             [
-                (pl.col("avg_download_time") + pl.col("total_time")).alias("total_time"),
-                (pl.col("benchmark_name_clean").str.replace("pynwb", "").alias("benchmark_name_clean")),
+                pl.col("benchmark_name_clean").alias("download_match_name"),
+                pl.col("benchmark_name_clean").str.split(" ").list.first().alias("format_family"),
             ]
+        )
+        download_df = download_df.with_columns(
+            [
+                pl.col("benchmark_name_clean").str.replace("dandi api", "pynwb").alias("download_match_name"),
+                pl.col("benchmark_name_clean").str.split(" ").list.first().alias("format_family"),
+            ]
+        )
+
+        return (
+            local_read_and_slice_df.join(
+                download_df.group_by(["modality", "download_match_name", "format_family"]).agg(
+                    pl.col("value").mean().alias("avg_download_time")
+                ),
+                on=["modality", "download_match_name", "format_family"],
+                how="left",
+            )
+            .filter(pl.col("avg_download_time").is_not_null())
+            .with_columns(
+                [
+                    (pl.col("avg_download_time") + pl.col("total_time")).alias("total_time"),
+                    pl.col("format_family").alias("benchmark_name_clean"),
+                ]
+            )
         )
