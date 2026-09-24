@@ -419,8 +419,11 @@ class BenchmarkVisualizer:
         else:
             summary_group_cols = ["benchmark_name_type", col_name, "modality"]
 
+        summary_df = base_kwargs["df"]
+        if base_kwargs["metric_order"] is not None:
+            summary_df = summary_df[summary_df[col_name].isin(base_kwargs["metric_order"])]
         self._write_summary_table(
-            df=base_kwargs["df"],
+            df=summary_df,
             group_cols=summary_group_cols,
             value_col="value",
             filename=f"{figure_filename.stem}_summary.csv",
