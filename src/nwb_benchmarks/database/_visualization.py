@@ -469,15 +469,71 @@ class BenchmarkVisualizer:
         )
 
         if network_tracking:
-            base_kwargs.update(
-                {
-                    "df": filtered_df.filter(~pl.col("is_preloaded")),
-                    "row": "variable",
-                    "sharex": "row",
-                    "row_xlabels": NETWORK_METRIC_LABELS,
-                }
-            )
-            summary_group_cols = ["benchmark_name_type", "slice_number", "variable", col_name, "modality"]
+            summary_group_cols = [
+                "benchmark_name_type",
+                "slice_number",
+                "is_preloaded",
+                "variable",
+                col_name,
+                "modality",
+            ]
+            for preload_value, preload_label, preload_caption in [
+                (False, "not_preloaded", "not preloaded"),
+                (True, "preloaded", "preloaded"),
+            ]:
+                preload_df = filtered_df.filter(pl.col("is_preloaded") == preload_value)
+                network_kwargs = base_kwargs.copy()
+                network_kwargs.update(
+                    {
+                        "df": preload_df,
+                        "row": "variable",
+                        "sharex": "row",
+                        "row_xlabels": NETWORK_METRIC_LABELS,
+                    }
+                )
+                self._write_summary_table(
+                    df=preload_df.to_pandas(),
+                    group_cols=summary_group_cols,
+                    value_col="value",
+                    filename=f"{prefix}slicing_{preload_label}_summary.csv",
+                )
+
+                for slice_num, slice_df in enumerate(preload_df.partition_by("slice_number")):
+                    figure_filename = self.output_directory / f"{prefix}slicing_{preload_label}_range{slice_num}.pdf"
+                    self._write_summary_table(
+                        df=slice_df.to_pandas(),
+                        group_cols=summary_group_cols,
+                        value_col="value",
+                        filename=f"{Path(figure_filename).stem}_summary.csv",
+                    )
+                    network_kwargs.update(
+                        {
+                            "df": slice_df.to_pandas(),
+                            "filename": figure_filename,
+                            "caption": (
+                                f"Network-tracking benchmark measurements across different methods and modalities for slice data "
+                                f"(range = {slice_num}, {preload_caption}). "
+                                "Rows separate network metrics. Text annotations, if present, display mean ± standard deviation and sample size (n). "
+                            ),
+                        }
+                    )
+                    self.plot_benchmark_dist(**network_kwargs)
+
+                network_kwargs.update(
+                    {
+                        "df": preload_df.to_pandas(),
+                        "catplot_kwargs": dict(),
+                        "kind": "strip",
+                        "add_annotations": False,
+                        "filename": self.output_directory / f"{prefix}slicing_{preload_label}_scatter.pdf",
+                        "caption": (
+                            f"Network-tracking benchmark measurements across different methods and modalities for slice data "
+                            f"({preload_caption}). Each point represents a single benchmark run. Rows separate network metrics. "
+                        ),
+                    }
+                )
+                self.plot_benchmark_dist(**network_kwargs)
+            return
         else:
             summary_group_cols = ["benchmark_name_type", "slice_number", "is_preloaded", col_name, "modality"]
 
