@@ -11,7 +11,10 @@ import polars as pl
 import seaborn as sns
 from packaging import version
 
-from nwb_benchmarks.database._processing import BenchmarkDatabase
+from nwb_benchmarks.database._processing import (
+    ENVIRONMENT_TIMEPOINTS,
+    BenchmarkDatabase,
+)
 
 DEFAULT_BENCHMARK_ORDER = [
     "hdf5 h5py remfile no cache",
@@ -63,7 +66,88 @@ class BenchmarkVisualizer:
         self.summary_tables_directory = Path(summary_tables_directory) if summary_tables_directory is not None else None
         if self.summary_tables_directory is not None:
             self.summary_tables_directory.mkdir(parents=True, exist_ok=True)
+        self._base_output_directory = self.output_directory
+        self._base_summary_tables_directory = self.summary_tables_directory
+        self.environment_label = None
+        self.environment_filename_postfix = ""
+        self.environment_caption_dates = None
+        self.skipped_outputs = []
         self._setup_matplotlib()
+
+    @staticmethod
+    def _environment_subdirectory_name(environment_label: str) -> str:
+        """Return output subdirectory for an environment plotting context."""
+        return "environments_all" if environment_label == "all" else f"environment_date_{environment_label}"
+
+    def _set_environment_output_context(
+        self, environment_label: Optional[str], environment_caption_dates: Optional[List[str]] = None
+    ) -> None:
+        """Set output directories and filename postfix for the current plotting context."""
+        self.environment_label = environment_label
+        self.environment_caption_dates = environment_caption_dates
+        self.environment_filename_postfix = "" if environment_label is None else f"_{environment_label}"
+
+        if environment_label is None:
+            self.output_directory = self._base_output_directory
+            self.summary_tables_directory = self._base_summary_tables_directory
+            return
+
+        subdirectory_name = self._environment_subdirectory_name(environment_label)
+        self.output_directory = self._base_output_directory / subdirectory_name
+        self.output_directory.mkdir(parents=True, exist_ok=True)
+        if self._base_summary_tables_directory is not None:
+            self.summary_tables_directory = self._base_summary_tables_directory / subdirectory_name
+            self.summary_tables_directory.mkdir(parents=True, exist_ok=True)
+
+    def _add_environment_caption(self, caption: Optional[str]) -> Optional[str]:
+        """Append environment-date context to captions for non-performance-over-time plots."""
+        if caption is None or self.environment_label is None:
+            return caption
+        if self.environment_label == "all":
+            dates = ", ".join(self.environment_caption_dates or [])
+            return caption + f"Environment dates included: {dates}. "
+        return caption + f"Environment date included: {self.environment_label}. "
+
+    def _filename_with_environment_postfix(self, stem: str, suffix: str = "", extension: str = ".pdf") -> str:
+        """Build a filename that includes the active environment postfix."""
+        return f"{stem}{suffix}{self.environment_filename_postfix}{extension}"
+
+    def _record_skipped_output(self, output_type: str, filename: Path | str, reason: str) -> None:
+        """Record a skipped figure or table for the root-level skipped-output report."""
+        self.skipped_outputs.append(
+            {
+                "environment": self.environment_label or "root",
+                "type": output_type,
+                "filename": str(filename),
+                "reason": reason,
+            }
+        )
+
+    def _write_skipped_outputs_report(self) -> None:
+        """Write a root-level text report describing skipped figures and summary tables."""
+        report_path = self._base_output_directory / "skipped_outputs.txt"
+        if not self.skipped_outputs:
+            report_path.write_text("No plots or summary tables were skipped.\n")
+            return
+
+        lines = [
+            "Skipped benchmark figure-generation outputs",
+            "===========================================",
+            "",
+            "The following plots or summary tables were skipped during figure generation.",
+            "",
+        ]
+        for skipped_output in self.skipped_outputs:
+            lines.extend(
+                [
+                    f"Environment: {skipped_output['environment']}",
+                    f"Type: {skipped_output['type']}",
+                    f"Output: {skipped_output['filename']}",
+                    f"Reason: {skipped_output['reason']}",
+                    "",
+                ]
+            )
+        report_path.write_text("\n".join(lines))
 
     @staticmethod
     def _setup_matplotlib():
@@ -132,12 +216,12 @@ class BenchmarkVisualizer:
             return
 
         if df.empty:
-            warnings.warn(f"No data available for summary table {filename}. Skipping table.")
+            self._record_skipped_output("summary table", filename, "No data available for summary table.")
             return
 
         missing_cols = [col for col in [*group_cols, value_col] if col not in df.columns]
         if missing_cols:
-            warnings.warn(f"Cannot write summary table {filename}; missing columns: {missing_cols}.")
+            self._record_skipped_output("summary table", filename, f"Missing columns: {missing_cols}.")
             return
 
         summary_df = (
@@ -242,7 +326,9 @@ class BenchmarkVisualizer:
         collected_df = df.collect()
 
         if collected_df.to_pandas().empty:
-            warnings.warn(f"No data available to plot for benchmark heatmap. Skipping plot.")
+            self._record_skipped_output(
+                "plot", title or "benchmark heatmap", "No data available for benchmark heatmap."
+            )
             return
 
         # Create heatmap dataframe (which will compute order if not provided)
@@ -289,7 +375,7 @@ class BenchmarkVisualizer:
             df = df[df[group].isin(metric_order)]
 
         if df.empty:
-            warnings.warn(f"Warning: No data available to plot for {filename}. Skipping plot.")
+            self._record_skipped_output("plot", filename, "No data available to plot.")
             return
 
         g = sns.catplot(
@@ -324,6 +410,7 @@ class BenchmarkVisualizer:
         # Add figure caption
         if kind == "strip" and caption is not None:
             caption += "Each point represents a single benchmark run. "
+        caption = self._add_environment_caption(caption)
         g.figure.text(0.5, -0.01, caption, ha="center", va="top", fontsize=9, wrap=True, style="italic")
 
         sns.despine()
@@ -351,7 +438,7 @@ class BenchmarkVisualizer:
             df = df[df[group].isin(metric_order)]
 
         if df.empty:
-            warnings.warn(f"Warning: No data available to plot for {filename}. Skipping plot.")
+            self._record_skipped_output("plot", filename, "No data available to plot.")
             return
 
         g = sns.catplot(
@@ -369,6 +456,7 @@ class BenchmarkVisualizer:
         )
 
         if caption is not None:
+            caption = self._add_environment_caption(caption)
             g.figure.text(0.5, -0.01, caption, ha="center", va="top", fontsize=9, wrap=True, style="italic")
 
         # Add intersection annotations
@@ -402,7 +490,7 @@ class BenchmarkVisualizer:
             f"Benchmark execution times across different methods and modalities{caption_suffix}"
             "Text annotations, if present, display mean ± standard deviation and sample size (n). "
         )
-        figure_filename = self.output_directory / f"{prefix}file_open{suffix}.pdf"
+        figure_filename = self.output_directory / self._filename_with_environment_postfix(f"{prefix}file_open", suffix)
         base_kwargs = self._create_plot_kwargs(
             df=filtered_df.to_pandas(),
             group=col_name,
@@ -438,7 +526,8 @@ class BenchmarkVisualizer:
                 "catplot_kwargs": dict(),
                 "kind": "strip",
                 "add_annotations": False,
-                "filename": self.output_directory / f"{prefix}file_open_scatter{suffix}.pdf",
+                "filename": self.output_directory
+                / self._filename_with_environment_postfix(f"{prefix}file_open_scatter", suffix),
             }
         )
         self.plot_benchmark_dist(**base_kwargs)
@@ -495,11 +584,13 @@ class BenchmarkVisualizer:
                     df=preload_df.to_pandas(),
                     group_cols=summary_group_cols,
                     value_col="value",
-                    filename=f"{prefix}slicing_{preload_label}_summary.csv",
+                    filename=f"{prefix}slicing_{preload_label}{self.environment_filename_postfix}_summary.csv",
                 )
 
                 for slice_num, slice_df in enumerate(preload_df.partition_by("slice_number")):
-                    figure_filename = self.output_directory / f"{prefix}slicing_{preload_label}_range{slice_num}.pdf"
+                    figure_filename = self.output_directory / self._filename_with_environment_postfix(
+                        f"{prefix}slicing_{preload_label}_range{slice_num}"
+                    )
                     self._write_summary_table(
                         df=slice_df.to_pandas(),
                         group_cols=summary_group_cols,
@@ -525,7 +616,8 @@ class BenchmarkVisualizer:
                         "catplot_kwargs": dict(),
                         "kind": "strip",
                         "add_annotations": False,
-                        "filename": self.output_directory / f"{prefix}slicing_{preload_label}_scatter.pdf",
+                        "filename": self.output_directory
+                        / self._filename_with_environment_postfix(f"{prefix}slicing_{preload_label}_scatter"),
                         "caption": (
                             f"Network-tracking benchmark measurements across different methods and modalities for slice data "
                             f"({preload_caption}). Each point represents a single benchmark run. Rows separate network metrics. "
@@ -542,12 +634,14 @@ class BenchmarkVisualizer:
             df=summary_df,
             group_cols=summary_group_cols,
             value_col="value",
-            filename=f"{prefix}slicing_summary.csv",
+            filename=f"{prefix}slicing{self.environment_filename_postfix}_summary.csv",
         )
 
         # Plot box plot for each slice value
         for slice_num, slice_df in enumerate(base_kwargs["df"].partition_by("slice_number")):
-            figure_filename = self.output_directory / f"{prefix}slicing_range{slice_num}.pdf"
+            figure_filename = self.output_directory / self._filename_with_environment_postfix(
+                f"{prefix}slicing_range{slice_num}"
+            )
             self._write_summary_table(
                 df=slice_df.to_pandas(),
                 group_cols=summary_group_cols,
@@ -573,7 +667,10 @@ class BenchmarkVisualizer:
                 "catplot_kwargs": dict(),
                 "kind": "strip",
                 "add_annotations": False,
-                "filename": self.output_directory / f"{prefix}slicing_scatter.pdf",
+                "filename": self.output_directory / self._filename_with_environment_postfix(f"{prefix}slicing_scatter"),
+                "caption": (
+                    "Benchmark execution times across different methods and modalities for slice data across all slice ranges. "
+                ),
             }
         )
         self.plot_benchmark_dist(**base_kwargs)
@@ -639,10 +736,12 @@ class BenchmarkVisualizer:
         print("Plotting download vs stream benchmark comparison...")
         prefix = self._get_filename_prefix(network_tracking)
         base_filename = self.output_directory / f"{prefix}slicing"
-        remote_read_figure_filename = Path(f"{base_filename}_with_remote_read.pdf")
-        remote_range_figure_filename = Path(f"{base_filename}_range.pdf")
-        local_read_figure_filename = Path(f"{base_filename}_with_local_read.pdf")
-        extrapolation_figure_filename = Path(f"{base_filename}_with_extrapolation.pdf")
+        remote_read_figure_filename = Path(f"{base_filename}_with_remote_read{self.environment_filename_postfix}.pdf")
+        remote_range_figure_filename = Path(f"{base_filename}_range{self.environment_filename_postfix}.pdf")
+        local_read_figure_filename = Path(f"{base_filename}_with_local_read{self.environment_filename_postfix}.pdf")
+        extrapolation_figure_filename = Path(
+            f"{base_filename}_with_extrapolation{self.environment_filename_postfix}.pdf"
+        )
         plot_kwargs = {
             "group": "benchmark_name_clean",
             "row": "variable" if network_tracking else "is_preloaded",
@@ -758,7 +857,7 @@ class BenchmarkVisualizer:
         collected_stream = stream_df.collect()
 
         if collected_download.is_empty():
-            warnings.warn(f"Warning: No data available to plot for {filename}. Skipping plot.")
+            self._record_skipped_output("plot", filename, "No download/local data available to plot.")
             return
 
         # Get unique modalities and row values for subplot layout
@@ -815,6 +914,7 @@ class BenchmarkVisualizer:
         axes[0, 0].legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=8)
 
         # Add figure caption
+        caption = self._add_environment_caption(caption)
         fig.text(0.5, -0.01, caption, ha="center", va="top", fontsize=9, wrap=True, style="italic")
 
         sns.despine()
@@ -840,25 +940,25 @@ class BenchmarkVisualizer:
             df=read_h5py_df.collect().to_pandas(),
             group_cols=["benchmark_name_type", "benchmark_name_clean", "modality"],
             value_col="value",
-            filename="method_rankings_heatmap_remote_file_open_summary.csv",
+            filename=f"method_rankings_heatmap_remote_file_open{self.environment_filename_postfix}_summary.csv",
         )
         self._write_summary_table(
             df=read_pynwb_df.collect().to_pandas(),
             group_cols=["benchmark_name_type", "benchmark_name_clean", "modality"],
             value_col="value",
-            filename="method_rankings_heatmap_remote_file_open_pynwb_summary.csv",
+            filename=f"method_rankings_heatmap_remote_file_open_pynwb{self.environment_filename_postfix}_summary.csv",
         )
         self._write_summary_table(
             df=slice_largest_not_preloaded_df.collect().to_pandas(),
             group_cols=["benchmark_name_type", "slice_number", "is_preloaded", "benchmark_name_clean", "modality"],
             value_col="value",
-            filename="method_rankings_heatmap_remote_slicing_not_preloaded_largest_range_summary.csv",
+            filename=f"method_rankings_heatmap_remote_slicing_not_preloaded_largest_range{self.environment_filename_postfix}_summary.csv",
         )
         self._write_summary_table(
             df=slice_largest_preloaded_df.collect().to_pandas(),
             group_cols=["benchmark_name_type", "slice_number", "is_preloaded", "benchmark_name_clean", "modality"],
             value_col="value",
-            filename="method_rankings_heatmap_remote_slicing_preloaded_largest_range_summary.csv",
+            filename=f"method_rankings_heatmap_remote_slicing_preloaded_largest_range{self.environment_filename_postfix}_summary.csv",
         )
 
         fig, axes = plt.subplots(4, 1, figsize=(8, 20))
@@ -901,10 +1001,11 @@ class BenchmarkVisualizer:
             "For remote slicing, only the largest slice range was used to compute the averages, "
             "and preloaded and non-preloaded benchmark conditions are shown separately."
         )
+        caption = self._add_environment_caption(caption)
         fig.text(0.5, -0.01, caption, ha="center", va="top", fontsize=9, wrap=True, style="italic")
 
         plt.tight_layout()
-        plt.savefig(self.output_directory / "method_rankings_heatmap.pdf", dpi=300)
+        plt.savefig(self.output_directory / self._filename_with_environment_postfix("method_rankings_heatmap"), dpi=300)
         plt.close()
 
     def plot_performance_across_versions(
@@ -926,8 +1027,8 @@ class BenchmarkVisualizer:
         )
 
         if df.empty:
-            warnings.warn(
-                f"Warning: No data available to plot for performance_over_{benchmark_type}.pdf. Skipping plot."
+            self._record_skipped_output(
+                "plot", self.output_directory / f"performance_over_{benchmark_type}.pdf", "No data available to plot."
             )
             return
 
@@ -978,8 +1079,8 @@ class BenchmarkVisualizer:
         plt.savefig(self.output_directory / f"performance_over_{benchmark_type}.pdf", dpi=300, bbox_inches="tight")
         plt.close()
 
-    def plot_all(self, db: BenchmarkDatabase):
-        """Generate all benchmark visualization plots."""
+    def _plot_environment_specific_figures(self, db: BenchmarkDatabase):
+        """Generate all plots that should be scoped to one environment context."""
 
         # # 1. WHICH LIBRARY SHOULD I USE TO STREAM DATA
         # Remote file reading / slicing benchmarks
@@ -1003,7 +1104,33 @@ class BenchmarkVisualizer:
         # time to open + slice locally vs. number of slices
         self.plot_download_vs_stream_benchmarks(db)
 
+    def plot_all(self, db: BenchmarkDatabase, environment_timepoints: Optional[Dict[str, str]] = None):
+        """Generate all benchmark visualization plots."""
+        environment_timepoints = environment_timepoints or ENVIRONMENT_TIMEPOINTS
+        environment_dates = list(environment_timepoints.keys())
+
+        # Generate ordinary plots for all configured environments together.
+        configured_environment_ids = list(environment_timepoints.values())
+        all_environment_db = db.with_environment_ids(configured_environment_ids)
+        self._set_environment_output_context("all", environment_caption_dates=environment_dates)
+        print(f"\nStarting ordinary plot generation for environment context: all ({', '.join(environment_dates)})")
+        self._plot_environment_specific_figures(all_environment_db)
+        print("Finished ordinary plot generation for environment context: all")
+
+        # Generate ordinary plots separately for each configured environment timepoint.
+        for environment_date, environment_id in environment_timepoints.items():
+            environment_db = db.with_environment_id(environment_id)
+            self._set_environment_output_context(environment_date, environment_caption_dates=[environment_date])
+            print(f"\nStarting ordinary plot generation for environment date: {environment_date}")
+            self._plot_environment_specific_figures(environment_db)
+            print(f"Finished ordinary plot generation for environment date: {environment_date}")
+
         # 3. HOW DOES PERFORMANCE CHANGE ACROSS VERSIONS/TIME
-        # performance on a single test (time to read/slice) vs. version (h5py, fsspec, etc.)
+        # Performance-over-time plots span all configured environments and remain at the root output directory.
+        self._set_environment_output_context(None)
+        print("\nStarting performance-over-time plot generation across all configured environments")
         self.plot_performance_across_versions(db, benchmark_type="time_remote_file_reading")
         self.plot_performance_across_versions(db, benchmark_type="time_remote_slicing")
+        print("Finished performance-over-time plot generation")
+        self._write_skipped_outputs_report()
+        print(f"Skipped-output report written to {self._base_output_directory / 'skipped_outputs.txt'}")

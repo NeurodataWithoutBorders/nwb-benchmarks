@@ -1,7 +1,7 @@
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import polars as pl
 
@@ -37,6 +37,8 @@ class BenchmarkDatabase:
         db_directory: Optional[Path] = None,
         machine_id: str = None,
         exclude_older: str = None,
+        environment_id: str = None,
+        environment_ids: Optional[List[str]] = None,
     ):
         """Initialize database handler with directories and machine ID.
 
@@ -49,6 +51,8 @@ class BenchmarkDatabase:
         self.packages_of_interest = PACKAGES_OF_INTEREST
         self.environment_timepoints = ENVIRONMENT_TIMEPOINTS
         self.exclude_older = exclude_older
+        self.environment_id = environment_id
+        self.environment_ids = environment_ids
 
         # Set default directories if not provided
         cache_dir = Path.home() / ".cache" / "nwb-benchmarks"
@@ -110,6 +114,14 @@ class BenchmarkDatabase:
             .filter(
                 pl.col("timestamp") >= pl.lit(self.exclude_older).str.to_datetime()
                 if self.exclude_older is not None
+                else pl.lit(True)
+            )
+            .filter(
+                pl.col("environment_id") == self.environment_id if self.environment_id is not None else pl.lit(True)
+            )
+            .filter(
+                pl.col("environment_id").is_in(self.environment_ids)
+                if self.environment_ids is not None
                 else pl.lit(True)
             )
             # Extract benchmark name components
@@ -246,6 +258,26 @@ class BenchmarkDatabase:
         """Filter benchmark tests."""
         results_df = self.get_results()
         return results_df.filter(pl.col("benchmark_name_type") == benchmark_type)
+
+    def with_environment_id(self, environment_id: Optional[str]) -> "BenchmarkDatabase":
+        """Return a database view filtered to a single environment ID."""
+        return BenchmarkDatabase(
+            results_directory=self.results_directory,
+            db_directory=self.db_directory,
+            machine_id=self.machine_id,
+            exclude_older=self.exclude_older,
+            environment_id=environment_id,
+        )
+
+    def with_environment_ids(self, environment_ids: Optional[List[str]]) -> "BenchmarkDatabase":
+        """Return a database view filtered to a set of environment IDs."""
+        return BenchmarkDatabase(
+            results_directory=self.results_directory,
+            db_directory=self.db_directory,
+            machine_id=self.machine_id,
+            exclude_older=self.exclude_older,
+            environment_ids=environment_ids,
+        )
 
     def combine_read_and_slice_times(
         self, read_col_name: str, slice_col_name: str, with_baseline: bool = False
