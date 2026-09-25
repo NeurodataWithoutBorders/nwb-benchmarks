@@ -419,8 +419,11 @@ class BenchmarkVisualizer:
         else:
             summary_group_cols = ["benchmark_name_type", col_name, "modality"]
 
+        summary_df = base_kwargs["df"]
+        if base_kwargs["metric_order"] is not None:
+            summary_df = summary_df[summary_df[col_name].isin(base_kwargs["metric_order"])]
         self._write_summary_table(
-            df=base_kwargs["df"],
+            df=summary_df,
             group_cols=summary_group_cols,
             value_col="value",
             filename=f"{figure_filename.stem}_summary.csv",
@@ -466,15 +469,71 @@ class BenchmarkVisualizer:
         )
 
         if network_tracking:
-            base_kwargs.update(
-                {
-                    "df": filtered_df.filter(~pl.col("is_preloaded")),
-                    "row": "variable",
-                    "sharex": "row",
-                    "row_xlabels": NETWORK_METRIC_LABELS,
-                }
-            )
-            summary_group_cols = ["benchmark_name_type", "slice_number", "variable", col_name, "modality"]
+            summary_group_cols = [
+                "benchmark_name_type",
+                "slice_number",
+                "is_preloaded",
+                "variable",
+                col_name,
+                "modality",
+            ]
+            for preload_value, preload_label, preload_caption in [
+                (False, "not_preloaded", "not preloaded"),
+                (True, "preloaded", "preloaded"),
+            ]:
+                preload_df = filtered_df.filter(pl.col("is_preloaded") == preload_value)
+                network_kwargs = base_kwargs.copy()
+                network_kwargs.update(
+                    {
+                        "df": preload_df,
+                        "row": "variable",
+                        "sharex": "row",
+                        "row_xlabels": NETWORK_METRIC_LABELS,
+                    }
+                )
+                self._write_summary_table(
+                    df=preload_df.to_pandas(),
+                    group_cols=summary_group_cols,
+                    value_col="value",
+                    filename=f"{prefix}slicing_{preload_label}_summary.csv",
+                )
+
+                for slice_num, slice_df in enumerate(preload_df.partition_by("slice_number")):
+                    figure_filename = self.output_directory / f"{prefix}slicing_{preload_label}_range{slice_num}.pdf"
+                    self._write_summary_table(
+                        df=slice_df.to_pandas(),
+                        group_cols=summary_group_cols,
+                        value_col="value",
+                        filename=f"{Path(figure_filename).stem}_summary.csv",
+                    )
+                    network_kwargs.update(
+                        {
+                            "df": slice_df.to_pandas(),
+                            "filename": figure_filename,
+                            "caption": (
+                                f"Network-tracking benchmark measurements across different methods and modalities for slice data "
+                                f"(range = {slice_num}, {preload_caption}). "
+                                "Rows separate network metrics. Text annotations, if present, display mean ± standard deviation and sample size (n). "
+                            ),
+                        }
+                    )
+                    self.plot_benchmark_dist(**network_kwargs)
+
+                network_kwargs.update(
+                    {
+                        "df": preload_df.to_pandas(),
+                        "catplot_kwargs": dict(),
+                        "kind": "strip",
+                        "add_annotations": False,
+                        "filename": self.output_directory / f"{prefix}slicing_{preload_label}_scatter.pdf",
+                        "caption": (
+                            f"Network-tracking benchmark measurements across different methods and modalities for slice data "
+                            f"({preload_caption}). Each point represents a single benchmark run. Rows separate network metrics. "
+                        ),
+                    }
+                )
+                self.plot_benchmark_dist(**network_kwargs)
+            return
         else:
             summary_group_cols = ["benchmark_name_type", "slice_number", "is_preloaded", col_name, "modality"]
 
@@ -774,6 +833,8 @@ class BenchmarkVisualizer:
         slice_largest_df = slice_df.filter(pl.col("benchmark_name_clean").is_in(self.pynwb_read_order)).filter(
             pl.col("slice_number") == 5
         )
+        slice_largest_not_preloaded_df = slice_largest_df.filter(pl.col("is_preloaded") == False)
+        slice_largest_preloaded_df = slice_largest_df.filter(pl.col("is_preloaded") == True)
 
         self._write_summary_table(
             df=read_h5py_df.collect().to_pandas(),
@@ -788,13 +849,19 @@ class BenchmarkVisualizer:
             filename="method_rankings_heatmap_remote_file_open_pynwb_summary.csv",
         )
         self._write_summary_table(
-            df=slice_largest_df.collect().to_pandas(),
+            df=slice_largest_not_preloaded_df.collect().to_pandas(),
             group_cols=["benchmark_name_type", "slice_number", "is_preloaded", "benchmark_name_clean", "modality"],
             value_col="value",
-            filename="method_rankings_heatmap_remote_slicing_largest_range_summary.csv",
+            filename="method_rankings_heatmap_remote_slicing_not_preloaded_largest_range_summary.csv",
+        )
+        self._write_summary_table(
+            df=slice_largest_preloaded_df.collect().to_pandas(),
+            group_cols=["benchmark_name_type", "slice_number", "is_preloaded", "benchmark_name_clean", "modality"],
+            value_col="value",
+            filename="method_rankings_heatmap_remote_slicing_preloaded_largest_range_summary.csv",
         )
 
-        fig, axes = plt.subplots(3, 1, figsize=(8, 16))
+        fig, axes = plt.subplots(4, 1, figsize=(8, 20))
         axes[0] = self.plot_benchmark_heatmap(
             df=read_h5py_df,
             ax=axes[0],
@@ -809,11 +876,18 @@ class BenchmarkVisualizer:
             vmin=0,
             vmax=200,
         )
-        # plot only largest slice range for clarity
+        # plot only largest slice range for clarity, separated by preload condition
         axes[2] = self.plot_benchmark_heatmap(
-            df=slice_largest_df,  # NOTE - if updating, also update caption in plot_benchmark_heatmap
+            df=slice_largest_not_preloaded_df,  # NOTE - if updating, also update caption in plot_benchmark_heatmap
             ax=axes[2],
-            title="Remote Slicing",
+            title="Remote Slicing - Not Preloaded",
+            vmin=0,
+            vmax=10,
+        )
+        axes[3] = self.plot_benchmark_heatmap(
+            df=slice_largest_preloaded_df,  # NOTE - if updating, also update caption in plot_benchmark_heatmap
+            ax=axes[3],
+            title="Remote Slicing - Preloaded",
             vmin=0,
             vmax=10,
         )
@@ -824,7 +898,8 @@ class BenchmarkVisualizer:
             "Each cell displays the average time for a specific method-modality combination. "
             "The order is sorted by format type (lindi, zarr, hdf5) and then by average performance within each type. "
             "Stars (*) indicate the fastest method for each modality. "
-            "For remote slicing, only the largest slice range was used to compute the averages."
+            "For remote slicing, only the largest slice range was used to compute the averages, "
+            "and preloaded and non-preloaded benchmark conditions are shown separately."
         )
         fig.text(0.5, -0.01, caption, ha="center", va="top", fontsize=9, wrap=True, style="italic")
 
