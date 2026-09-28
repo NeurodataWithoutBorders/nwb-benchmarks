@@ -237,11 +237,13 @@ class BenchmarkVisualizer:
         return {environment_id: environment_date for environment_date, environment_id in ENVIRONMENT_TIMEPOINTS.items()}
 
     @staticmethod
-    def _benchmark_family(benchmark_name_type: str) -> Optional[str]:
-        """Map ordinary and network-tracking benchmark types to comparable benchmark families."""
+    def _benchmark_family(benchmark_name_type: str, benchmark_name_clean: str) -> Optional[str]:
+        """Map ordinary and network-tracking benchmark rows to comparable benchmark families."""
+        if benchmark_name_type in ["time_remote_file_reading", "network_tracking_remote_file_reading"]:
+            if "pynwb" in str(benchmark_name_clean):
+                return "remote_file_reading_pynwb"
+            return "remote_file_opening_backend"
         family_map = {
-            "time_remote_file_reading": "remote_file_reading",
-            "network_tracking_remote_file_reading": "remote_file_reading",
             "time_remote_slicing": "remote_slicing",
             "network_tracking_remote_slicing": "remote_slicing",
         }
@@ -262,7 +264,9 @@ class BenchmarkVisualizer:
 
         df = df.copy()
         df["environment_date"] = df["environment_id"].map(self._environment_date_map())
-        df["benchmark_family"] = df["benchmark_name_type"].map(self._benchmark_family)
+        df["benchmark_family"] = df.apply(
+            lambda row: self._benchmark_family(row["benchmark_name_type"], row["benchmark_name_clean"]), axis=1
+        )
         df = df[df["benchmark_family"].notna() & df["environment_date"].notna()]
 
         key_cols = [
@@ -363,6 +367,232 @@ class BenchmarkVisualizer:
         pooled["modality_group"] = pd.Categorical(pooled["modality_group"], categories=modality_order, ordered=True)
         return pooled.sort_values(["benchmark_family", "modality_group", "network_metric"])
 
+    @staticmethod
+    def _cache_stack_from_benchmark_name(benchmark_name: str) -> Optional[str]:
+        """Identify cache-comparable access stacks from cleaned benchmark names."""
+        if "fsspec https" in benchmark_name:
+            return "fsspec_https"
+        if "fsspec s3" in benchmark_name:
+            return "fsspec_s3"
+        if "remfile" in benchmark_name:
+            return "remfile"
+        return None
+
+    @staticmethod
+    def _cache_state_from_benchmark_name(benchmark_name: str) -> Optional[str]:
+        """Identify whether a cleaned benchmark name is a with-cache or no-cache variant."""
+        if "with cache" in benchmark_name:
+            return "with_cache"
+        if "no cache" in benchmark_name:
+            return "no_cache"
+        return None
+
+    def _build_cache_effect_pair_table(self, matched_df: pd.DataFrame, metrics: List[str]) -> pd.DataFrame:
+        """Build environment-aware with-cache vs no-cache paired summaries from matched conditions."""
+        cache_df = matched_df.copy()
+        cache_df["cache_stack"] = cache_df["benchmark_name_clean"].map(self._cache_stack_from_benchmark_name)
+        cache_df["cache_state"] = cache_df["benchmark_name_clean"].map(self._cache_state_from_benchmark_name)
+        cache_df["cache_pair_name"] = (
+            cache_df["benchmark_name_clean"]
+            .str.replace(" with cache", "", regex=False)
+            .str.replace(" no cache", "", regex=False)
+        )
+        cache_df = cache_df[cache_df["cache_stack"].notna() & cache_df["cache_state"].isin(["with_cache", "no_cache"])]
+        if cache_df.empty:
+            return pd.DataFrame()
+        cache_df["slice_number"] = cache_df["slice_number"].fillna("not_applicable")
+        cache_df["scaling_value"] = cache_df["scaling_value"].fillna("not_applicable")
+
+        value_cols = ["ordinary_runtime_median", *metrics]
+        id_cols = [
+            "environment_id",
+            "environment_date",
+            "benchmark_family",
+            "modality",
+            "cache_stack",
+            "cache_pair_name",
+            "is_preloaded",
+            "slice_number",
+            "scaling_value",
+        ]
+        paired = cache_df.pivot_table(
+            index=id_cols,
+            columns="cache_state",
+            values=value_cols,
+            aggfunc="first",
+            dropna=True,
+        )
+        paired.columns = [f"{value_col}_{cache_state}" for value_col, cache_state in paired.columns]
+        paired = paired.reset_index()
+        paired["slice_number"] = paired["slice_number"].replace("not_applicable", np.nan)
+        paired["scaling_value"] = paired["scaling_value"].replace("not_applicable", np.nan)
+
+        required_cols = ["ordinary_runtime_median_no_cache", "ordinary_runtime_median_with_cache"]
+        paired = paired.dropna(subset=required_cols, how="any")
+        for value_col in value_cols:
+            no_cache_col = f"{value_col}_no_cache"
+            with_cache_col = f"{value_col}_with_cache"
+            if no_cache_col not in paired.columns or with_cache_col not in paired.columns:
+                continue
+            paired[f"{value_col}_delta_with_minus_no_cache"] = paired[with_cache_col] - paired[no_cache_col]
+            paired[f"{value_col}_ratio_with_over_no_cache"] = paired[with_cache_col] / paired[no_cache_col].replace(
+                0, np.nan
+            )
+            paired[f"{value_col}_percent_change_with_vs_no_cache"] = (
+                100 * paired[f"{value_col}_delta_with_minus_no_cache"] / paired[no_cache_col].replace(0, np.nan)
+            )
+        return paired.sort_values(id_cols)
+
+    def _summarize_cache_effect_pairs(self, cache_pairs: pd.DataFrame, metrics: List[str]) -> pd.DataFrame:
+        """Summarize paired with-cache vs no-cache effects across configured environments."""
+        if cache_pairs.empty:
+            return pd.DataFrame()
+        grouping_cols = ["benchmark_family", "cache_stack", "cache_pair_name", "modality", "is_preloaded"]
+        return self._summarize_cache_effect_pairs_for_groups(cache_pairs, metrics, grouping_cols)
+
+    def _summarize_cache_effect_pairs_by_method(self, cache_pairs: pd.DataFrame, metrics: List[str]) -> pd.DataFrame:
+        """Summarize paired with-cache vs no-cache effects across modalities for each method/access stack."""
+        if cache_pairs.empty:
+            return pd.DataFrame()
+        grouping_cols = ["benchmark_family", "cache_stack", "cache_pair_name", "is_preloaded"]
+        return self._summarize_cache_effect_pairs_for_groups(cache_pairs, metrics, grouping_cols)
+
+    def _summarize_cache_effect_pairs_for_groups(
+        self, cache_pairs: pd.DataFrame, metrics: List[str], grouping_cols: List[str]
+    ) -> pd.DataFrame:
+        """Summarize paired with-cache vs no-cache effects for a requested grouping."""
+        rows = []
+        for group_values, group_df in cache_pairs.groupby(grouping_cols, dropna=False):
+            if not isinstance(group_values, tuple):
+                group_values = (group_values,)
+            row = dict(zip(grouping_cols, group_values))
+            row["paired_conditions_n"] = len(group_df)
+            row["environment_dates"] = ", ".join(map(str, sorted(group_df["environment_date"].dropna().unique())))
+            if "modality" not in grouping_cols:
+                row["modalities"] = ", ".join(map(str, sorted(group_df["modality"].dropna().unique())))
+            for value_col in ["ordinary_runtime_median", *metrics]:
+                no_cache_col = f"{value_col}_no_cache"
+                with_cache_col = f"{value_col}_with_cache"
+                ratio_col = f"{value_col}_ratio_with_over_no_cache"
+                pct_col = f"{value_col}_percent_change_with_vs_no_cache"
+                if no_cache_col not in group_df.columns or with_cache_col not in group_df.columns:
+                    continue
+                row[f"{value_col}_no_cache_median"] = group_df[no_cache_col].median()
+                row[f"{value_col}_with_cache_median"] = group_df[with_cache_col].median()
+                row[f"{value_col}_ratio_with_over_no_cache_median"] = group_df[ratio_col].median()
+                row[f"{value_col}_percent_change_with_vs_no_cache_median"] = group_df[pct_col].median()
+            rows.append(row)
+        return pd.DataFrame(rows).sort_values(grouping_cols)
+
+    def _write_cache_effect_summaries(self, matched_df: pd.DataFrame, metrics: List[str]) -> None:
+        """Write environment-aware cache-effect summary tables for environments_all."""
+        if self.summary_tables_directory is None or self.environment_label != "all":
+            return
+        cache_pairs = self._build_cache_effect_pair_table(matched_df, metrics)
+        if cache_pairs.empty:
+            self._record_skipped_output(
+                "table", "cache_effect_paired_conditions.csv", "No cache/no-cache pairs available."
+            )
+            return
+        cache_summary = self._summarize_cache_effect_pairs(cache_pairs, metrics)
+        cache_method_summary = self._summarize_cache_effect_pairs_by_method(cache_pairs, metrics)
+        cache_pairs.to_csv(self.summary_tables_directory / "cache_effect_paired_conditions.csv", index=False)
+        cache_summary.to_csv(self.summary_tables_directory / "cache_effect_summary.csv", index=False)
+        cache_method_summary.to_csv(self.summary_tables_directory / "cache_effect_method_summary.csv", index=False)
+
+    def _build_preload_effect_pair_table(self, matched_df: pd.DataFrame, metrics: List[str]) -> pd.DataFrame:
+        """Build matched preloaded vs non-preloaded summaries from slicing conditions."""
+        preload_df = matched_df[matched_df["benchmark_family"] == "remote_slicing"].copy()
+        if preload_df.empty:
+            return pd.DataFrame()
+        preload_df = preload_df[preload_df["is_preloaded"].isin([True, False])]
+        if preload_df.empty:
+            return pd.DataFrame()
+
+        preload_df["cache_stack"] = preload_df["benchmark_name_clean"].map(self._cache_stack_from_benchmark_name)
+        preload_df["cache_state"] = preload_df["benchmark_name_clean"].map(self._cache_state_from_benchmark_name)
+        preload_df["cache_state"] = preload_df["cache_state"].fillna("not_applicable")
+        preload_df["cache_stack"] = preload_df["cache_stack"].fillna("not_applicable")
+        preload_df["preload_state"] = preload_df["is_preloaded"].map({False: "not_preloaded", True: "preloaded"})
+
+        value_cols = ["ordinary_runtime_median", *metrics]
+        id_cols = [
+            "environment_id",
+            "environment_date",
+            "benchmark_family",
+            "modality",
+            "benchmark_name_clean",
+            "cache_stack",
+            "cache_state",
+            "slice_number",
+            "scaling_value",
+        ]
+        paired = preload_df.pivot_table(
+            index=id_cols,
+            columns="preload_state",
+            values=value_cols,
+            aggfunc="first",
+            dropna=True,
+        )
+        paired.columns = [f"{value_col}_{preload_state}" for value_col, preload_state in paired.columns]
+        paired = paired.reset_index()
+
+        required_cols = ["ordinary_runtime_median_not_preloaded", "ordinary_runtime_median_preloaded"]
+        paired = paired.dropna(subset=required_cols, how="any")
+        for value_col in value_cols:
+            not_preloaded_col = f"{value_col}_not_preloaded"
+            preloaded_col = f"{value_col}_preloaded"
+            if not_preloaded_col not in paired.columns or preloaded_col not in paired.columns:
+                continue
+            paired[f"{value_col}_delta_preloaded_minus_not_preloaded"] = (
+                paired[preloaded_col] - paired[not_preloaded_col]
+            )
+            paired[f"{value_col}_ratio_preloaded_over_not_preloaded"] = paired[preloaded_col] / paired[
+                not_preloaded_col
+            ].replace(0, np.nan)
+            paired[f"{value_col}_percent_change_preloaded_vs_not_preloaded"] = (
+                100
+                * paired[f"{value_col}_delta_preloaded_minus_not_preloaded"]
+                / paired[not_preloaded_col].replace(0, np.nan)
+            )
+        return paired.sort_values(id_cols)
+
+    def _summarize_preload_effect_pairs(self, preload_pairs: pd.DataFrame, metrics: List[str]) -> pd.DataFrame:
+        """Summarize matched preloaded vs non-preloaded effects by method and modality."""
+        if preload_pairs.empty:
+            return pd.DataFrame()
+        grouping_cols = ["benchmark_family", "benchmark_name_clean", "cache_stack", "cache_state", "modality"]
+        rows = []
+        for group_values, group_df in preload_pairs.groupby(grouping_cols, dropna=False):
+            row = dict(zip(grouping_cols, group_values))
+            row["paired_conditions_n"] = len(group_df)
+            row["environment_dates"] = ", ".join(map(str, sorted(group_df["environment_date"].dropna().unique())))
+            for value_col in ["ordinary_runtime_median", *metrics]:
+                not_preloaded_col = f"{value_col}_not_preloaded"
+                preloaded_col = f"{value_col}_preloaded"
+                ratio_col = f"{value_col}_ratio_preloaded_over_not_preloaded"
+                pct_col = f"{value_col}_percent_change_preloaded_vs_not_preloaded"
+                if not_preloaded_col not in group_df.columns or preloaded_col not in group_df.columns:
+                    continue
+                row[f"{value_col}_not_preloaded_median"] = group_df[not_preloaded_col].median()
+                row[f"{value_col}_preloaded_median"] = group_df[preloaded_col].median()
+                row[f"{value_col}_ratio_preloaded_over_not_preloaded_median"] = group_df[ratio_col].median()
+                row[f"{value_col}_percent_change_preloaded_vs_not_preloaded_median"] = group_df[pct_col].median()
+            rows.append(row)
+        return pd.DataFrame(rows).sort_values(grouping_cols)
+
+    def _write_preload_effect_summaries(self, matched_df: pd.DataFrame, metrics: List[str]) -> None:
+        """Write environment-aware preload-effect summary tables for environments_all."""
+        if self.summary_tables_directory is None or self.environment_label != "all":
+            return
+        preload_pairs = self._build_preload_effect_pair_table(matched_df, metrics)
+        if preload_pairs.empty:
+            self._record_skipped_output("table", "preload_effect_paired_conditions.csv", "No preload pairs available.")
+            return
+        preload_summary = self._summarize_preload_effect_pairs(preload_pairs, metrics)
+        preload_pairs.to_csv(self.summary_tables_directory / "preload_effect_paired_conditions.csv", index=False)
+        preload_summary.to_csv(self.summary_tables_directory / "preload_effect_summary.csv", index=False)
+
     def plot_network_runtime_correlations(self, db: BenchmarkDatabase) -> None:
         """Generate pooled network/runtime matched tables and correlation plots for configured environments."""
         print("Plotting pooled network-runtime correlation analysis...")
@@ -385,6 +615,8 @@ class BenchmarkVisualizer:
 
         if self.summary_tables_directory is not None:
             matched_df.to_csv(self.summary_tables_directory / "network_runtime_matched_conditions.csv", index=False)
+            self._write_cache_effect_summaries(matched_df, available_metrics)
+            self._write_preload_effect_summaries(matched_df, available_metrics)
 
         pooled = self._compute_network_runtime_pooled_correlations_by_modality(matched_df, available_metrics)
         pooled["environment_scope"] = "pooled across configured official-machine software environments"
@@ -435,9 +667,10 @@ class BenchmarkVisualizer:
             self._record_skipped_output("plot", filename, "No network metrics available for scatter matrix.")
             return
 
-        benchmark_families = ["remote_file_reading", "remote_slicing"]
+        benchmark_families = ["remote_file_opening_backend", "remote_file_reading_pynwb", "remote_slicing"]
         family_titles = {
-            "remote_file_reading": "Remote file reading",
+            "remote_file_opening_backend": "Remote backend file opening",
+            "remote_file_reading_pynwb": "Remote PyNWB file reading",
             "remote_slicing": "Remote slicing",
         }
         modality_order = ["Ecephys", "Ophys", "Icephys"]
@@ -445,7 +678,7 @@ class BenchmarkVisualizer:
         fig, axes = plt.subplots(
             len(metrics),
             len(benchmark_families),
-            figsize=(9, 4.5 * len(metrics)),
+            figsize=(13.5, 4.5 * len(metrics)),
             squeeze=False,
         )
         for row_index, metric in enumerate(metrics):
@@ -544,7 +777,7 @@ class BenchmarkVisualizer:
             correlations = correlations.copy()
             correlations["modality_group"] = "all"
 
-        benchmark_families = ["remote_file_reading", "remote_slicing"]
+        benchmark_families = ["remote_file_opening_backend", "remote_file_reading_pynwb", "remote_slicing"]
         modality_order = ["all", "Ecephys", "Ophys", "Icephys"]
         metric_labels = [NETWORK_METRIC_LABELS[metric] for metric in NETWORK_METRIC_LABELS]
         metric_labels = [label for label in metric_labels if label in correlations["network_metric_label"].unique()]
@@ -565,13 +798,15 @@ class BenchmarkVisualizer:
             self._record_skipped_output("plot", filename, "Pooled correlations are undefined or null-only.")
             return
 
-        fig = plt.figure(figsize=(13, 7.5))
-        gs = fig.add_gridspec(2, 2, width_ratios=[40, 1], hspace=0.35, wspace=0.04)
+        fig = plt.figure(figsize=(13, 10))
+        gs = fig.add_gridspec(3, 2, width_ratios=[40, 1], hspace=0.35, wspace=0.04)
         axes = [fig.add_subplot(gs[0, 0])]
         axes.append(fig.add_subplot(gs[1, 0], sharex=axes[0]))
+        axes.append(fig.add_subplot(gs[2, 0], sharex=axes[0]))
         cbar_ax = fig.add_subplot(gs[:, 1])
         family_titles = {
-            "remote_file_reading": "Remote file reading",
+            "remote_file_opening_backend": "Remote backend file opening",
+            "remote_file_reading_pynwb": "Remote PyNWB file reading",
             "remote_slicing": "Remote slicing",
         }
         for index, (ax, (benchmark_family, heatmap_df)) in enumerate(zip(axes, heatmaps)):
@@ -591,7 +826,7 @@ class BenchmarkVisualizer:
             ax.set(xlabel="", ylabel="Modality subset")
             ax.set_title(family_titles.get(benchmark_family, benchmark_family))
             ax.tick_params(axis="y", rotation=0)
-            if index == 0:
+            if index < len(axes) - 1:
                 ax.tick_params(axis="x", labelbottom=False, bottom=False)
         axes[-1].set_xlabel("Network metric")
         fig.suptitle("Pooled correlations between ordinary runtime and network metrics", y=0.98)
