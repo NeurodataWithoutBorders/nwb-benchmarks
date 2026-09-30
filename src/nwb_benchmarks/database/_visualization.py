@@ -163,9 +163,21 @@ class BenchmarkVisualizer:
             return f"  {mean:.2e} ± {std:.2e}, n={int(count)}"
         return f"  {mean:.2f} ± {std:.2f}, n={int(count)}"
 
+    @staticmethod
+    def _safe_median(series: pd.Series) -> float:
+        """Return the median of non-null values, or NaN for empty/all-null series without warning."""
+        non_null = series.dropna()
+        if non_null.empty:
+            return np.nan
+        return non_null.median()
+
     def _add_mean_std_annotations(self, value: str, group: str, order: List[str], **kwargs):
         """Add mean ± std annotations to plot."""
-        stats_df = kwargs.get("data").groupby(group)[value].agg(["mean", "std", "max", "count"])
+        data = kwargs.get("data")
+        stats_data = data[[group, value]].dropna(subset=[value])
+        if stats_data.empty:
+            return
+        stats_df = stats_data.groupby(group, observed=True)[value].agg(["mean", "std", "max", "count"])
 
         for i, label in enumerate(order):
             if label in stats_df.index:
@@ -424,8 +436,8 @@ class BenchmarkVisualizer:
         )
         paired.columns = [f"{value_col}_{cache_state}" for value_col, cache_state in paired.columns]
         paired = paired.reset_index()
-        paired["slice_number"] = paired["slice_number"].replace("not_applicable", np.nan)
-        paired["scaling_value"] = paired["scaling_value"].replace("not_applicable", np.nan)
+        paired["slice_number"] = paired["slice_number"].where(paired["slice_number"] != "not_applicable", np.nan)
+        paired["scaling_value"] = paired["scaling_value"].where(paired["scaling_value"] != "not_applicable", np.nan)
 
         required_cols = ["ordinary_runtime_median_no_cache", "ordinary_runtime_median_with_cache"]
         paired = paired.dropna(subset=required_cols, how="any")
@@ -477,10 +489,10 @@ class BenchmarkVisualizer:
                 pct_col = f"{value_col}_percent_change_with_vs_no_cache"
                 if no_cache_col not in group_df.columns or with_cache_col not in group_df.columns:
                     continue
-                row[f"{value_col}_no_cache_median"] = group_df[no_cache_col].median()
-                row[f"{value_col}_with_cache_median"] = group_df[with_cache_col].median()
-                row[f"{value_col}_ratio_with_over_no_cache_median"] = group_df[ratio_col].median()
-                row[f"{value_col}_percent_change_with_vs_no_cache_median"] = group_df[pct_col].median()
+                row[f"{value_col}_no_cache_median"] = self._safe_median(group_df[no_cache_col])
+                row[f"{value_col}_with_cache_median"] = self._safe_median(group_df[with_cache_col])
+                row[f"{value_col}_ratio_with_over_no_cache_median"] = self._safe_median(group_df[ratio_col])
+                row[f"{value_col}_percent_change_with_vs_no_cache_median"] = self._safe_median(group_df[pct_col])
             rows.append(row)
         return pd.DataFrame(rows).sort_values(grouping_cols)
 
@@ -501,8 +513,8 @@ class BenchmarkVisualizer:
         cache_method_summary.to_csv(self.summary_tables_directory / "cache_effect_method_summary.csv", index=False)
 
     def _build_preload_effect_pair_table(self, matched_df: pd.DataFrame, metrics: List[str]) -> pd.DataFrame:
-        """Build matched preloaded vs non-preloaded summaries from slicing conditions."""
-        preload_df = matched_df[matched_df["benchmark_family"] == "remote_slicing"].copy()
+        """Build matched preloaded vs non-preloaded summaries from matched conditions."""
+        preload_df = matched_df.copy()
         if preload_df.empty:
             return pd.DataFrame()
         preload_df = preload_df[preload_df["is_preloaded"].isin([True, False])]
@@ -513,7 +525,16 @@ class BenchmarkVisualizer:
         preload_df["cache_state"] = preload_df["benchmark_name_clean"].map(self._cache_state_from_benchmark_name)
         preload_df["cache_state"] = preload_df["cache_state"].fillna("not_applicable")
         preload_df["cache_stack"] = preload_df["cache_stack"].fillna("not_applicable")
+        preload_df["preload_pair_name"] = (
+            preload_df["benchmark_name_clean"]
+            .astype(str)
+            .str.replace(" preloaded", "", regex=False)
+            .str.replace("  ", " ", regex=False)
+            .str.strip()
+        )
         preload_df["preload_state"] = preload_df["is_preloaded"].map({False: "not_preloaded", True: "preloaded"})
+        preload_df["slice_number"] = preload_df["slice_number"].fillna("not_applicable")
+        preload_df["scaling_value"] = preload_df["scaling_value"].fillna("not_applicable")
 
         value_cols = ["ordinary_runtime_median", *metrics]
         id_cols = [
@@ -521,7 +542,7 @@ class BenchmarkVisualizer:
             "environment_date",
             "benchmark_family",
             "modality",
-            "benchmark_name_clean",
+            "preload_pair_name",
             "cache_stack",
             "cache_state",
             "slice_number",
@@ -536,6 +557,10 @@ class BenchmarkVisualizer:
         )
         paired.columns = [f"{value_col}_{preload_state}" for value_col, preload_state in paired.columns]
         paired = paired.reset_index()
+        paired = paired.rename(columns={"preload_pair_name": "benchmark_name_clean"})
+        id_cols = ["benchmark_name_clean" if col == "preload_pair_name" else col for col in id_cols]
+        paired["slice_number"] = paired["slice_number"].where(paired["slice_number"] != "not_applicable", np.nan)
+        paired["scaling_value"] = paired["scaling_value"].where(paired["scaling_value"] != "not_applicable", np.nan)
 
         required_cols = ["ordinary_runtime_median_not_preloaded", "ordinary_runtime_median_preloaded"]
         paired = paired.dropna(subset=required_cols, how="any")
@@ -574,10 +599,12 @@ class BenchmarkVisualizer:
                 pct_col = f"{value_col}_percent_change_preloaded_vs_not_preloaded"
                 if not_preloaded_col not in group_df.columns or preloaded_col not in group_df.columns:
                     continue
-                row[f"{value_col}_not_preloaded_median"] = group_df[not_preloaded_col].median()
-                row[f"{value_col}_preloaded_median"] = group_df[preloaded_col].median()
-                row[f"{value_col}_ratio_preloaded_over_not_preloaded_median"] = group_df[ratio_col].median()
-                row[f"{value_col}_percent_change_preloaded_vs_not_preloaded_median"] = group_df[pct_col].median()
+                row[f"{value_col}_not_preloaded_median"] = self._safe_median(group_df[not_preloaded_col])
+                row[f"{value_col}_preloaded_median"] = self._safe_median(group_df[preloaded_col])
+                row[f"{value_col}_ratio_preloaded_over_not_preloaded_median"] = self._safe_median(group_df[ratio_col])
+                row[f"{value_col}_percent_change_preloaded_vs_not_preloaded_median"] = self._safe_median(
+                    group_df[pct_col]
+                )
             rows.append(row)
         return pd.DataFrame(rows).sort_values(grouping_cols)
 
