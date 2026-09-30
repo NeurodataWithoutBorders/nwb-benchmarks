@@ -232,6 +232,379 @@ class BenchmarkVisualizer:
         summary_df.to_csv(self.summary_tables_directory / filename, index=False)
 
     @staticmethod
+    def _environment_date_map() -> Dict[str, str]:
+        """Return mapping from configured environment IDs to date labels."""
+        return {environment_id: environment_date for environment_date, environment_id in ENVIRONMENT_TIMEPOINTS.items()}
+
+    @staticmethod
+    def _benchmark_family(benchmark_name_type: str) -> Optional[str]:
+        """Map ordinary and network-tracking benchmark types to comparable benchmark families."""
+        family_map = {
+            "time_remote_file_reading": "remote_file_reading",
+            "network_tracking_remote_file_reading": "remote_file_reading",
+            "time_remote_slicing": "remote_slicing",
+            "network_tracking_remote_slicing": "remote_slicing",
+        }
+        return family_map.get(benchmark_name_type)
+
+    @staticmethod
+    def _safe_correlation(df: pd.DataFrame, x_col: str, y_col: str, method: str) -> float:
+        """Compute a correlation, returning NaN when it is undefined."""
+        if len(df) < 3 or df[x_col].nunique(dropna=True) < 2 or df[y_col].nunique(dropna=True) < 2:
+            return np.nan
+        return df[x_col].corr(df[y_col], method=method)
+
+    def _build_network_runtime_matched_table(self, db: BenchmarkDatabase) -> pd.DataFrame:
+        """Build environment-aware matched ordinary-runtime and network-metric condition table."""
+        df = db.get_results().collect().to_pandas()
+        if df.empty:
+            return pd.DataFrame()
+
+        df = df.copy()
+        df["environment_date"] = df["environment_id"].map(self._environment_date_map())
+        df["benchmark_family"] = df["benchmark_name_type"].map(self._benchmark_family)
+        df = df[df["benchmark_family"].notna() & df["environment_date"].notna()]
+
+        key_cols = [
+            "environment_id",
+            "environment_date",
+            "benchmark_family",
+            "modality",
+            "benchmark_name_clean",
+            "is_preloaded",
+            "slice_number",
+            "scaling_value",
+        ]
+        ordinary = df[df["benchmark_name_type"].isin(["time_remote_file_reading", "time_remote_slicing"])]
+        ordinary = (
+            ordinary.groupby(key_cols, dropna=False)["value"]
+            .agg(ordinary_runtime_n="count", ordinary_runtime_median="median", ordinary_runtime_mean="mean")
+            .reset_index()
+        )
+
+        network = df[
+            df["benchmark_name_type"].isin(["network_tracking_remote_file_reading", "network_tracking_remote_slicing"])
+        ]
+        network = (
+            network.groupby([*key_cols, "variable"], dropna=False)["value"]
+            .agg(network_metric_n="count", network_metric_median="median", network_metric_mean="mean")
+            .reset_index()
+        )
+        network_median = network.pivot_table(
+            index=key_cols, columns="variable", values="network_metric_median", aggfunc="first", dropna=False
+        ).reset_index()
+        network_mean = network.pivot_table(
+            index=key_cols, columns="variable", values="network_metric_mean", aggfunc="first", dropna=False
+        ).reset_index()
+        network_mean = network_mean.rename(
+            columns={col: f"{col}_mean" for col in network_mean.columns if col not in key_cols}
+        )
+        network_n = network.pivot_table(
+            index=key_cols, columns="variable", values="network_metric_n", aggfunc="first", dropna=False
+        ).reset_index()
+        network_n = network_n.rename(columns={col: f"{col}_n" for col in network_n.columns if col not in key_cols})
+
+        matched = ordinary.merge(network_median, on=key_cols, how="inner")
+        matched = matched.merge(network_mean, on=key_cols, how="left").merge(network_n, on=key_cols, how="left")
+        return matched.sort_values(
+            [
+                "environment_date",
+                "benchmark_family",
+                "modality",
+                "is_preloaded",
+                "slice_number",
+                "benchmark_name_clean",
+            ],
+            na_position="first",
+        )
+
+    def _compute_network_runtime_correlations(
+        self, matched_df: pd.DataFrame, metrics: List[str], group_cols: Optional[List[str]] = None
+    ) -> pd.DataFrame:
+        """Compute Spearman and Pearson correlations for matched network/runtime evidence."""
+        group_cols = group_cols or []
+        rows = []
+        grouped = [((), matched_df)] if not group_cols else matched_df.groupby(group_cols, dropna=False)
+        for group_key, group_df in grouped:
+            if group_cols and not isinstance(group_key, tuple):
+                group_key = (group_key,)
+            group_values = dict(zip(group_cols, group_key)) if group_cols else {}
+            for metric in metrics:
+                if metric not in group_df.columns:
+                    continue
+                corr_df = group_df[["ordinary_runtime_median", metric]].dropna()
+                rows.append(
+                    {
+                        **group_values,
+                        "network_metric": metric,
+                        "network_metric_label": NETWORK_METRIC_LABELS.get(metric, metric),
+                        "n": len(corr_df),
+                        "spearman_r": self._safe_correlation(corr_df, "ordinary_runtime_median", metric, "spearman"),
+                        "pearson_r": self._safe_correlation(corr_df, "ordinary_runtime_median", metric, "pearson"),
+                    }
+                )
+        return pd.DataFrame(rows)
+
+    def _compute_network_runtime_pooled_correlations_by_modality(
+        self, matched_df: pd.DataFrame, metrics: List[str]
+    ) -> pd.DataFrame:
+        """Compute pooled correlations by benchmark family for all data and each modality."""
+        rows = []
+        for modality_group, modality_df in [("all", matched_df), *list(matched_df.groupby("modality", dropna=False))]:
+            if pd.isna(modality_group):
+                modality_group = "unknown"
+            correlations = self._compute_network_runtime_correlations(modality_df, metrics, ["benchmark_family"])
+            correlations["modality_group"] = modality_group
+            rows.append(correlations)
+        if not rows:
+            return pd.DataFrame()
+        pooled = pd.concat(rows, ignore_index=True)
+        modality_order = ["all", "Ecephys", "Ophys", "Icephys", "unknown"]
+        pooled["modality_group"] = pd.Categorical(pooled["modality_group"], categories=modality_order, ordered=True)
+        return pooled.sort_values(["benchmark_family", "modality_group", "network_metric"])
+
+    def plot_network_runtime_correlations(self, db: BenchmarkDatabase) -> None:
+        """Generate pooled network/runtime matched tables and correlation plots for configured environments."""
+        print("Plotting pooled network-runtime correlation analysis...")
+        matched_df = self._build_network_runtime_matched_table(db)
+        if matched_df.empty:
+            self._record_skipped_output(
+                "network analytics",
+                "network_runtime_matched_conditions.csv",
+                "No matched ordinary/network rows available.",
+            )
+            return
+
+        available_metrics = [metric for metric in NETWORK_METRIC_LABELS if metric in matched_df.columns]
+        available_metrics = [metric for metric in available_metrics if matched_df[metric].notna().any()]
+        if not available_metrics:
+            self._record_skipped_output(
+                "network analytics", "network_runtime_correlations_pooled.csv", "No non-null network metrics available."
+            )
+            return
+
+        if self.summary_tables_directory is not None:
+            matched_df.to_csv(self.summary_tables_directory / "network_runtime_matched_conditions.csv", index=False)
+
+        pooled = self._compute_network_runtime_pooled_correlations_by_modality(matched_df, available_metrics)
+        pooled["environment_scope"] = "pooled across configured official-machine software environments"
+        by_environment = self._compute_network_runtime_correlations(
+            matched_df, available_metrics, ["environment_date", "benchmark_family"]
+        )
+        if self.summary_tables_directory is not None:
+            pooled.to_csv(self.summary_tables_directory / "network_runtime_correlations_pooled.csv", index=False)
+            by_environment.to_csv(
+                self.summary_tables_directory / "network_runtime_correlations_by_environment.csv", index=False
+            )
+            sensitivity = (
+                by_environment.groupby(["benchmark_family", "network_metric", "network_metric_label"], dropna=False)
+                .agg(
+                    environments_with_defined_spearman=("spearman_r", "count"),
+                    min_spearman_r=("spearman_r", "min"),
+                    max_spearman_r=("spearman_r", "max"),
+                )
+                .reset_index()
+            )
+            sensitivity["spearman_sign_changes_across_environments"] = (sensitivity["min_spearman_r"] < 0) & (
+                sensitivity["max_spearman_r"] > 0
+            )
+            sensitivity.to_csv(
+                self.summary_tables_directory / "network_runtime_correlation_sensitivity_summary.csv", index=False
+            )
+
+        self._plot_network_runtime_scatter_matrix(
+            matched_df,
+            available_metrics,
+            "network_runtime_scatter_matrix_loglog.pdf",
+            log_scale=True,
+        )
+        self._plot_network_runtime_scatter_matrix(
+            matched_df,
+            available_metrics,
+            "network_runtime_scatter_matrix_linear.pdf",
+            log_scale=False,
+        )
+        self._plot_network_runtime_heatmap(pooled, "network_runtime_correlation_heatmap.pdf")
+
+    def _plot_network_runtime_scatter_matrix(
+        self, matched_df: pd.DataFrame, metrics: List[str], filename: str, log_scale: bool = False
+    ) -> None:
+        """Plot matched ordinary runtime against all available network metrics in one matrix."""
+        metrics = [metric for metric in metrics if metric in matched_df.columns and matched_df[metric].notna().any()]
+        if not metrics:
+            self._record_skipped_output("plot", filename, "No network metrics available for scatter matrix.")
+            return
+
+        benchmark_families = ["remote_file_reading", "remote_slicing"]
+        family_titles = {
+            "remote_file_reading": "Remote file reading",
+            "remote_slicing": "Remote slicing",
+        }
+        modality_order = ["Ecephys", "Ophys", "Icephys"]
+        palette = dict(zip(modality_order, sns.color_palette("colorblind", n_colors=len(modality_order))))
+        fig, axes = plt.subplots(
+            len(metrics),
+            len(benchmark_families),
+            figsize=(9, 4.5 * len(metrics)),
+            squeeze=False,
+        )
+        for row_index, metric in enumerate(metrics):
+            for col_index, benchmark_family in enumerate(benchmark_families):
+                ax = axes[row_index, col_index]
+                plot_df = matched_df[
+                    matched_df["benchmark_family"].eq(benchmark_family)
+                    & matched_df[metric].notna()
+                    & matched_df["ordinary_runtime_median"].notna()
+                ]
+                if log_scale:
+                    plot_df = plot_df[(plot_df[metric] > 0) & (plot_df["ordinary_runtime_median"] > 0)]
+                if plot_df.empty:
+                    ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+                    ax.set_axis_off()
+                    continue
+                corr_df = plot_df[["ordinary_runtime_median", metric]].dropna()
+                spearman_r = self._safe_correlation(corr_df, "ordinary_runtime_median", metric, "spearman")
+                pearson_r = self._safe_correlation(corr_df, "ordinary_runtime_median", metric, "pearson")
+                sns.scatterplot(
+                    data=plot_df,
+                    x=metric,
+                    y="ordinary_runtime_median",
+                    hue="modality",
+                    hue_order=modality_order,
+                    palette=palette,
+                    s=18,
+                    alpha=0.65,
+                    linewidth=0,
+                    ax=ax,
+                    legend=row_index == 0 and col_index == len(benchmark_families) - 1,
+                )
+                fit_x = plot_df[metric].to_numpy(dtype=float)
+                fit_y = plot_df["ordinary_runtime_median"].to_numpy(dtype=float)
+                if len(plot_df) >= 3 and np.unique(fit_x).size > 1 and np.unique(fit_y).size > 1:
+                    if log_scale:
+                        fit_x_values = np.log10(fit_x)
+                        fit_y_values = np.log10(fit_y)
+                        x_line = np.geomspace(fit_x.min(), fit_x.max(), 100)
+                        slope, intercept = np.polyfit(fit_x_values, fit_y_values, 1)
+                        y_line = 10 ** (slope * np.log10(x_line) + intercept)
+                    else:
+                        x_line = np.linspace(fit_x.min(), fit_x.max(), 100)
+                        slope, intercept = np.polyfit(fit_x, fit_y, 1)
+                        y_line = slope * x_line + intercept
+                    ax.plot(x_line, y_line, color="black", linewidth=1.0, alpha=0.8)
+                if log_scale:
+                    ax.set_xscale("log")
+                    ax.set_yscale("log")
+                annotation = f"n={len(corr_df)}\nρ={spearman_r:.2f}\nr={pearson_r:.2f}"
+                ax.text(
+                    0.03,
+                    0.97,
+                    annotation,
+                    ha="left",
+                    va="top",
+                    transform=ax.transAxes,
+                    fontsize=8,
+                    bbox={"boxstyle": "round,pad=0.2", "facecolor": "white", "edgecolor": "none", "alpha": 0.75},
+                )
+                ax.set_xlabel(NETWORK_METRIC_LABELS.get(metric, metric) if row_index == len(metrics) - 1 else "")
+                ax.set_ylabel("Runtime (s)" if col_index == 0 else "")
+                ax.set_box_aspect(1)
+                if row_index == 0:
+                    ax.set_title(family_titles.get(benchmark_family, benchmark_family))
+                if col_index == 0:
+                    ax.text(
+                        -0.32,
+                        0.5,
+                        NETWORK_METRIC_LABELS.get(metric, metric),
+                        ha="right",
+                        va="center",
+                        rotation=90,
+                        transform=ax.transAxes,
+                        fontsize=9,
+                    )
+                if ax.get_legend() is not None:
+                    ax.legend(title="Modality", loc="center left", bbox_to_anchor=(1.02, 0.5), frameon=False)
+        fig.suptitle(
+            "Matched ordinary runtime vs. network metrics, pooled across configured official-machine environments"
+            f" ({'log-log' if log_scale else 'linear-linear'} axes)",
+            y=0.995,
+        )
+        caption = "Each point is a matched environment-aware condition. Black lines show least-squares fits on the plotted scale."
+        fig.text(0.5, 0.003, caption, ha="center", va="bottom", fontsize=9, style="italic")
+        plt.tight_layout(rect=(0.08, 0.02, 0.92, 0.985))
+        plt.savefig(self.output_directory / filename, dpi=300, bbox_inches="tight")
+        plt.close()
+
+    def _plot_network_runtime_heatmap(self, correlations: pd.DataFrame, filename: str) -> None:
+        """Plot pooled Spearman correlations as family-specific modality heatmaps."""
+        if correlations.empty or "spearman_r" not in correlations.columns:
+            self._record_skipped_output("plot", filename, "No pooled correlations available for heatmap.")
+            return
+        if "modality_group" not in correlations.columns:
+            correlations = correlations.copy()
+            correlations["modality_group"] = "all"
+
+        benchmark_families = ["remote_file_reading", "remote_slicing"]
+        modality_order = ["all", "Ecephys", "Ophys", "Icephys"]
+        metric_labels = [NETWORK_METRIC_LABELS[metric] for metric in NETWORK_METRIC_LABELS]
+        metric_labels = [label for label in metric_labels if label in correlations["network_metric_label"].unique()]
+        heatmaps = []
+        for benchmark_family in benchmark_families:
+            family_correlations = correlations[correlations["benchmark_family"] == benchmark_family]
+            heatmap_df = family_correlations.pivot_table(
+                index="modality_group",
+                columns="network_metric_label",
+                values="spearman_r",
+                aggfunc="first",
+                observed=False,
+            )
+            heatmap_df = heatmap_df.reindex(index=modality_order, columns=metric_labels)
+            heatmaps.append((benchmark_family, heatmap_df))
+
+        if not heatmaps or all(heatmap_df.dropna(how="all").empty for _, heatmap_df in heatmaps):
+            self._record_skipped_output("plot", filename, "Pooled correlations are undefined or null-only.")
+            return
+
+        fig = plt.figure(figsize=(13, 7.5))
+        gs = fig.add_gridspec(2, 2, width_ratios=[40, 1], hspace=0.35, wspace=0.04)
+        axes = [fig.add_subplot(gs[0, 0])]
+        axes.append(fig.add_subplot(gs[1, 0], sharex=axes[0]))
+        cbar_ax = fig.add_subplot(gs[:, 1])
+        family_titles = {
+            "remote_file_reading": "Remote file reading",
+            "remote_slicing": "Remote slicing",
+        }
+        for index, (ax, (benchmark_family, heatmap_df)) in enumerate(zip(axes, heatmaps)):
+            sns.heatmap(
+                heatmap_df,
+                annot=True,
+                fmt=".2f",
+                cmap="vlag",
+                center=0,
+                vmin=-1,
+                vmax=1,
+                ax=ax,
+                cbar=index == 0,
+                cbar_ax=cbar_ax if index == 0 else None,
+                cbar_kws={"label": "Spearman r"} if index == 0 else None,
+            )
+            ax.set(xlabel="", ylabel="Modality subset")
+            ax.set_title(family_titles.get(benchmark_family, benchmark_family))
+            ax.tick_params(axis="y", rotation=0)
+            if index == 0:
+                ax.tick_params(axis="x", labelbottom=False, bottom=False)
+        axes[-1].set_xlabel("Network metric")
+        fig.suptitle("Pooled correlations between ordinary runtime and network metrics", y=0.98)
+        caption = "Correlations are pooled across configured official-machine software environments after environment-aware matching."
+        fig.text(0.5, -0.01, caption, ha="center", va="top", fontsize=9, wrap=True, style="italic")
+        for tick in axes[-1].get_xticklabels():
+            tick.set_rotation(35)
+            tick.set_ha("right")
+        fig.subplots_adjust(left=0.12, right=0.94, bottom=0.23, top=0.90)
+        plt.savefig(self.output_directory / filename, dpi=300, bbox_inches="tight")
+        plt.close()
+
+    @staticmethod
     def _add_annotations_df(intersections_df: pl.DataFrame, order: List[str], **kwargs):
         """Add intersection annotations to plot."""
         ax = plt.gca()
@@ -1115,6 +1488,7 @@ class BenchmarkVisualizer:
         self._set_environment_output_context("all", environment_caption_dates=environment_dates)
         print(f"\nStarting ordinary plot generation for environment context: all ({', '.join(environment_dates)})")
         self._plot_environment_specific_figures(all_environment_db)
+        self.plot_network_runtime_correlations(all_environment_db)
         print("Finished ordinary plot generation for environment context: all")
 
         # Generate ordinary plots separately for each configured environment timepoint.
