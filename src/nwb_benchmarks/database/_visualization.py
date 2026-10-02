@@ -1,5 +1,7 @@
+import shutil
 import textwrap
 import warnings
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -16,18 +18,21 @@ from nwb_benchmarks.database._processing import (
     BenchmarkDatabase,
 )
 
-DEFAULT_BENCHMARK_ORDER = [
-    "hdf5 h5py remfile no cache",
-    "hdf5 h5py fsspec https no cache",
-    "hdf5 h5py fsspec s3 no cache",
-    "hdf5 h5py remfile with cache",
-    "hdf5 h5py fsspec https with cache",
-    "hdf5 h5py fsspec s3 with cache",
-    "hdf5 h5py ros3",
-    "lindi h5py",
-    "zarr s3",
-    "zarr s3 force no consolidated",
-]
+DEFAULT_BENCHMARK_LABELS = OrderedDict(
+    [
+        ("hdf5 h5py remfile no cache", "HDF5 remfile"),
+        ("hdf5 h5py remfile with cache", "HDF5 remfile cache"),
+        ("hdf5 h5py fsspec https no cache", "HDF5 fsspec HTTPS"),
+        ("hdf5 h5py fsspec https with cache", "HDF5 fsspec HTTPS cache"),
+        ("hdf5 h5py fsspec s3 no cache", "HDF5 fsspec S3"),
+        ("hdf5 h5py fsspec s3 with cache", "HDF5 fsspec S3 cache"),
+        ("hdf5 h5py ros3", "HDF5 ROS3"),
+        ("lindi h5py", "LINDI"),
+        ("zarr s3", "Zarr"),
+        ("zarr s3 force no consolidated", "Zarr unconsol."),
+    ]
+)
+DEFAULT_BENCHMARK_ORDER = list(DEFAULT_BENCHMARK_LABELS.keys())
 
 NETWORK_METRIC_LABELS = {
     "amount_downloaded_in_bytes": "Downloaded bytes",
@@ -216,6 +221,25 @@ class BenchmarkVisualizer:
 
         return plot_kwargs
 
+    @staticmethod
+    def _display_method_labels(method_order: List[str]) -> List[str]:
+        """Return display labels for backend and PyNWB benchmark method names."""
+        display_labels = dict(DEFAULT_BENCHMARK_LABELS)
+        display_labels.update(
+            {
+                method.replace("h5py", "pynwb").replace("zarr", "zarr pynwb"): label
+                for method, label in DEFAULT_BENCHMARK_LABELS.items()
+            }
+        )
+        labels = [display_labels.get(method, method) for method in method_order]
+        return labels
+
+    @staticmethod
+    def _display_method_label(method: str) -> str:
+        """Return display label for one backend or PyNWB benchmark method name."""
+        label = BenchmarkVisualizer._display_method_labels([method])[0]
+        return label
+
     def _write_summary_table(
         self,
         df: pd.DataFrame,
@@ -242,6 +266,25 @@ class BenchmarkVisualizer:
             .reset_index()
         )
         summary_df.to_csv(self.summary_tables_directory / filename, index=False)
+
+    def copy_environment_details(
+        self, db: BenchmarkDatabase, environment_timepoints: Optional[Dict[str, str]] = None
+    ) -> None:
+        """Copy configured environment JSON files to the summary-table output directory."""
+        if self.summary_tables_directory is None:
+            return
+
+        environment_timepoints = environment_timepoints or ENVIRONMENT_TIMEPOINTS
+        environment_directory = db.results_directory / "environments"
+        for environment_date, environment_id in environment_timepoints.items():
+            source_path = environment_directory / f"environment-{environment_id}.json"
+            target_path = self.summary_tables_directory / f"environment_date_{environment_date}.json"
+            if not source_path.exists():
+                self._record_skipped_output(
+                    "environment details", target_path.name, f"Missing environment file: {source_path}."
+                )
+                continue
+            shutil.copy2(source_path, target_path)
 
     @staticmethod
     def _environment_date_map() -> Dict[str, str]:
@@ -974,6 +1017,9 @@ class BenchmarkVisualizer:
 
         sns.heatmap(data=heatmap_df, annot=True, fmt=".3g", cmap="OrRd", ax=ax, vmin=vmin, vmax=vmax)
         ax.set(xlabel="", ylabel="")
+        if group == "benchmark_name_clean":
+            ax.set_yticks(np.arange(len(heatmap_df.index)) + 0.5)
+            ax.set_yticklabels(self._display_method_labels(heatmap_df.index.tolist()))
 
         # Add star for best method in each modality
         for j, col in enumerate(heatmap_df.columns):
@@ -1041,6 +1087,9 @@ class BenchmarkVisualizer:
         for ax in g.axes.flat:
             wrapped_title = "\n".join(textwrap.wrap(ax.get_title(), width=50))
             ax.set_title(wrapped_title)
+            if group == "benchmark_name_clean" and metric_order is not None:
+                ax.set_yticks(range(len(metric_order)))
+                ax.set_yticklabels(self._display_method_labels(metric_order))
 
         # Add figure caption
         if kind == "strip" and caption is not None:
@@ -1099,6 +1148,8 @@ class BenchmarkVisualizer:
             g.map_dataframe(self._add_annotations_df, intersections_df=intersections_df, order=metric_order)
 
         g.set(xlabel="Relative slice size", ylabel="Time (s)")
+        if metric_order is not None:
+            sns.move_legend(g, "upper right", labels=self._display_method_labels(metric_order))
         sns.despine()
         plt.savefig(filename, dpi=300, bbox_inches="tight")
         plt.close()
@@ -1114,7 +1165,8 @@ class BenchmarkVisualizer:
         suffix: str = "_pynwb",
     ):
         """Plot read benchmark results."""
-        print(f"Plotting read benchmarks for {benchmark_type}...")
+        output_family = "PyNWB" if suffix == "_pynwb" else "backend"
+        print(f"Plotting {output_family} read benchmarks for {benchmark_type}...")
 
         filtered_df = db.filter_tests(benchmark_type).collect()
         prefix = self._get_filename_prefix(network_tracking)
@@ -1348,7 +1400,14 @@ class BenchmarkVisualizer:
         y_local = m2 * x_range + b2
 
         # Plot the fitted lines and mark intersection point
-        ax.plot(x_range, y_remote, color=color, linestyle="solid", linewidth=2, label=f"{benchmark_name}")
+        ax.plot(
+            x_range,
+            y_remote,
+            color=color,
+            linestyle="solid",
+            linewidth=2,
+            label=self._display_method_label(benchmark_name),
+        )
         if benchmark_name.startswith("hdf5"):
             download_color = sns.color_palette("Greens")[-1]
         elif benchmark_name.startswith("zarr"):
@@ -1571,6 +1630,73 @@ class BenchmarkVisualizer:
         slice_largest_not_preloaded_df = slice_largest_df.filter(pl.col("is_preloaded") == False)
         slice_largest_preloaded_df = slice_largest_df.filter(pl.col("is_preloaded") == True)
 
+        # Compute and save the rankings of all methods across all benchmarks
+        file_open_to_pynwb_label = dict(zip(self.file_open_order, self.pynwb_read_order))
+
+        def compute_rank_table(
+            *,
+            df: pl.LazyFrame,
+            metric_order: List[str],
+            benchmark_label: str,
+            index_map: Optional[Dict[str, str]] = None,
+        ) -> pd.DataFrame:
+            heatmap_df = self._create_heatmap_df(df.collect(), "benchmark_name_clean", metric_order)
+            rank_df = heatmap_df.rank(axis=0, method="average", ascending=True)
+            if index_map is not None:
+                rank_df = rank_df.rename(index=index_map)
+            rank_df = rank_df.rename(columns={column: f"{benchmark_label}_{column}_rank" for column in rank_df.columns})
+            rank_df.index.name = "benchmark_name_clean"
+            return rank_df.reset_index()
+
+        rank_tables = [
+            compute_rank_table(
+                df=read_h5py_df,
+                metric_order=self.file_open_order,
+                benchmark_label="remote_file_opening",
+                index_map=file_open_to_pynwb_label,
+            ),
+            compute_rank_table(
+                df=read_pynwb_df,
+                metric_order=self.pynwb_read_order,
+                benchmark_label="remote_file_opening_pynwb",
+            ),
+            compute_rank_table(
+                df=slice_largest_not_preloaded_df,
+                metric_order=self.pynwb_read_order,
+                benchmark_label="remote_slicing_not_preloaded",
+            ),
+            compute_rank_table(
+                df=slice_largest_preloaded_df,
+                metric_order=self.pynwb_read_order,
+                benchmark_label="remote_slicing_preloaded",
+            ),
+        ]
+        method_rankings_summary = rank_tables[0]
+        for rank_table in rank_tables[1:]:
+            method_rankings_summary = method_rankings_summary.merge(rank_table, on="benchmark_name_clean", how="outer")
+        rank_columns = [column for column in method_rankings_summary.columns if column.endswith("_rank")]
+        method_rankings_summary["rank_average"] = method_rankings_summary[rank_columns].mean(axis=1)
+        method_rankings_summary["rank_median"] = method_rankings_summary[rank_columns].median(axis=1)
+        method_rankings_summary["rank_min"] = method_rankings_summary[rank_columns].min(axis=1)
+        method_rankings_summary["rank_max"] = method_rankings_summary[rank_columns].max(axis=1)
+        for modality in ["Ecephys", "Ophys", "Icephys"]:
+            modality_rank_columns = [column for column in rank_columns if f"_{modality}_rank" in column]
+            method_rankings_summary[f"rank_average_{modality}"] = method_rankings_summary[modality_rank_columns].mean(
+                axis=1
+            )
+            method_rankings_summary[f"rank_median_{modality}"] = method_rankings_summary[modality_rank_columns].median(
+                axis=1
+            )
+            method_rankings_summary[f"rank_min_{modality}"] = method_rankings_summary[modality_rank_columns].min(axis=1)
+            method_rankings_summary[f"rank_max_{modality}"] = method_rankings_summary[modality_rank_columns].max(axis=1)
+        if self.summary_tables_directory is not None:
+            method_rankings_summary.to_csv(
+                self.summary_tables_directory
+                / f"method_rankings_heatmap_method_ranks{self.environment_filename_postfix}_summary.csv",
+                index=False,
+            )
+
+        # Save the individal summary tables
         self._write_summary_table(
             df=read_h5py_df.collect().to_pandas(),
             group_cols=["benchmark_name_type", "benchmark_name_clean", "modality"],
@@ -1596,9 +1722,12 @@ class BenchmarkVisualizer:
             filename=f"method_rankings_heatmap_remote_slicing_preloaded_largest_range{self.environment_filename_postfix}_summary.csv",
         )
 
-        fig, axes = plt.subplots(4, 1, figsize=(8, 20))
+        # Plot the 4 heatmaps
+        fig, axes = plt.subplots(2, 2, figsize=(14, 14))
+        axes = axes.flatten()
         axes[0] = self.plot_benchmark_heatmap(
             df=read_h5py_df,
+            metric_order=self.file_open_order,
             ax=axes[0],
             title="Remote File Opening",
             vmin=0,
@@ -1606,6 +1735,7 @@ class BenchmarkVisualizer:
         )
         axes[1] = self.plot_benchmark_heatmap(
             df=read_pynwb_df,
+            metric_order=self.pynwb_read_order,
             ax=axes[1],
             title="Remote File Opening - PyNWB",
             vmin=0,
@@ -1614,6 +1744,7 @@ class BenchmarkVisualizer:
         # plot only largest slice range for clarity, separated by preload condition
         axes[2] = self.plot_benchmark_heatmap(
             df=slice_largest_not_preloaded_df,  # NOTE - if updating, also update caption in plot_benchmark_heatmap
+            metric_order=self.pynwb_read_order,
             ax=axes[2],
             title="Remote Slicing - Not Preloaded",
             vmin=0,
@@ -1621,17 +1752,31 @@ class BenchmarkVisualizer:
         )
         axes[3] = self.plot_benchmark_heatmap(
             df=slice_largest_preloaded_df,  # NOTE - if updating, also update caption in plot_benchmark_heatmap
+            metric_order=self.pynwb_read_order,
             ax=axes[3],
             title="Remote Slicing - Preloaded",
             vmin=0,
             vmax=10,
         )
 
+        # Add subfigure labels
+        for subfigure_label, ax in zip(["a)", "b)", "c)", "d)"], axes):
+            ax.text(
+                -0.08,
+                1.08,
+                subfigure_label,
+                transform=ax.transAxes,
+                fontsize=18,
+                fontweight="bold",
+                ha="left",
+                va="top",
+            )
+
         # Add figure caption
         caption = (
             f"Heatmap showing mean benchmark performance times (in seconds) across different data modalities. "
             "Each cell displays the average time for a specific method-modality combination. "
-            "The order is sorted by format type (lindi, zarr, hdf5) and then by average performance within each type. "
+            "Methods are shown in a fixed logical order for consistent comparison across panels. "
             "Stars (*) indicate the fastest method for each modality. "
             "For remote slicing, only the largest slice range was used to compute the averages, "
             "and preloaded and non-preloaded benchmark conditions are shown separately."
@@ -1639,6 +1784,7 @@ class BenchmarkVisualizer:
         caption = self._add_environment_caption(caption)
         fig.text(0.5, -0.01, caption, ha="center", va="top", fontsize=9, wrap=True, style="italic")
 
+        # Save the figure
         plt.tight_layout()
         plt.savefig(self.output_directory / self._filename_with_environment_postfix("method_rankings_heatmap"), dpi=300)
         plt.close()
@@ -1684,6 +1830,7 @@ class BenchmarkVisualizer:
             filename=f"performance_over_{benchmark_type}_summary.csv",
         )
 
+        method_order = self.pynwb_read_order if order is None else order
         g = sns.catplot(
             data=df,
             x="environment_timepoint",
@@ -1691,13 +1838,17 @@ class BenchmarkVisualizer:
             col="modality",
             row="is_preloaded" if benchmark_type == "time_remote_slicing" else None,
             hue="benchmark_name_clean",
-            hue_order=self.pynwb_read_order if order is None else order,
+            hue_order=method_order,
             order=sorted(df["environment_timepoint"].unique()),
             sharex=True,
             palette="Paired",
             sharey=False,
             kind="point",
         )
+        if g._legend is not None:
+            display_labels = dict(zip(method_order, self._display_method_labels(method_order)))
+            for text in g._legend.texts:
+                text.set_text(display_labels.get(text.get_text(), text.get_text()))
         g.set(xlabel="Environment timepoint", ylabel="Time (s)")
 
         # Add figure caption
@@ -1743,6 +1894,7 @@ class BenchmarkVisualizer:
         """Generate all benchmark visualization plots."""
         environment_timepoints = environment_timepoints or ENVIRONMENT_TIMEPOINTS
         environment_dates = list(environment_timepoints.keys())
+        self.copy_environment_details(db, environment_timepoints=environment_timepoints)
 
         # Generate ordinary plots for all configured environments together.
         configured_environment_ids = list(environment_timepoints.values())
