@@ -1,5 +1,6 @@
 import textwrap
 import warnings
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -16,18 +17,21 @@ from nwb_benchmarks.database._processing import (
     BenchmarkDatabase,
 )
 
-DEFAULT_BENCHMARK_ORDER = [
-    "hdf5 h5py remfile no cache",
-    "hdf5 h5py fsspec https no cache",
-    "hdf5 h5py fsspec s3 no cache",
-    "hdf5 h5py remfile with cache",
-    "hdf5 h5py fsspec https with cache",
-    "hdf5 h5py fsspec s3 with cache",
-    "hdf5 h5py ros3",
-    "lindi h5py",
-    "zarr s3",
-    "zarr s3 force no consolidated",
-]
+DEFAULT_BENCHMARK_LABELS = OrderedDict(
+    [
+        ("hdf5 h5py remfile no cache", "HDF5 remfile"),
+        ("hdf5 h5py remfile with cache", "HDF5 remfile cache"),
+        ("hdf5 h5py fsspec https no cache", "HDF5 fsspec HTTPS"),
+        ("hdf5 h5py fsspec https with cache", "HDF5 fsspec HTTPS cache"),
+        ("hdf5 h5py fsspec s3 no cache", "HDF5 fsspec S3"),
+        ("hdf5 h5py fsspec s3 with cache", "HDF5 fsspec S3 cache"),
+        ("hdf5 h5py ros3", "HDF5 ROS3"),
+        ("lindi h5py", "LINDI"),
+        ("zarr s3", "Zarr"),
+        ("zarr s3 force no consolidated", "Zarr unconsol."),
+    ]
+)
+DEFAULT_BENCHMARK_ORDER = list(DEFAULT_BENCHMARK_LABELS.keys())
 
 NETWORK_METRIC_LABELS = {
     "amount_downloaded_in_bytes": "Downloaded bytes",
@@ -215,6 +219,25 @@ class BenchmarkVisualizer:
         plot_kwargs.update(extra_kwargs)
 
         return plot_kwargs
+
+    @staticmethod
+    def _display_method_labels(method_order: List[str]) -> List[str]:
+        """Return display labels for backend and PyNWB benchmark method names."""
+        display_labels = dict(DEFAULT_BENCHMARK_LABELS)
+        display_labels.update(
+            {
+                method.replace("h5py", "pynwb").replace("zarr", "zarr pynwb"): label
+                for method, label in DEFAULT_BENCHMARK_LABELS.items()
+            }
+        )
+        labels = [display_labels.get(method, method) for method in method_order]
+        return labels
+
+    @classmethod
+    def _set_method_yticklabels(cls, ax: plt.Axes, method_order: List[str]) -> None:
+        """Apply display labels to a method y-axis while preserving its raw-method order."""
+        ax.set_yticks(range(len(method_order)))
+        ax.set_yticklabels(cls._display_method_labels(method_order))
 
     def _write_summary_table(
         self,
@@ -974,6 +997,8 @@ class BenchmarkVisualizer:
 
         sns.heatmap(data=heatmap_df, annot=True, fmt=".3g", cmap="OrRd", ax=ax, vmin=vmin, vmax=vmax)
         ax.set(xlabel="", ylabel="")
+        if group == "benchmark_name_clean":
+            self._set_method_yticklabels(ax, heatmap_df.index.tolist())
 
         # Add star for best method in each modality
         for j, col in enumerate(heatmap_df.columns):
@@ -1041,6 +1066,8 @@ class BenchmarkVisualizer:
         for ax in g.axes.flat:
             wrapped_title = "\n".join(textwrap.wrap(ax.get_title(), width=50))
             ax.set_title(wrapped_title)
+            if group == "benchmark_name_clean" and metric_order is not None:
+                self._set_method_yticklabels(ax, metric_order)
 
         # Add figure caption
         if kind == "strip" and caption is not None:
@@ -1599,6 +1626,7 @@ class BenchmarkVisualizer:
         fig, axes = plt.subplots(4, 1, figsize=(8, 20))
         axes[0] = self.plot_benchmark_heatmap(
             df=read_h5py_df,
+            metric_order=self.file_open_order,
             ax=axes[0],
             title="Remote File Opening",
             vmin=0,
@@ -1606,6 +1634,7 @@ class BenchmarkVisualizer:
         )
         axes[1] = self.plot_benchmark_heatmap(
             df=read_pynwb_df,
+            metric_order=self.pynwb_read_order,
             ax=axes[1],
             title="Remote File Opening - PyNWB",
             vmin=0,
@@ -1614,6 +1643,7 @@ class BenchmarkVisualizer:
         # plot only largest slice range for clarity, separated by preload condition
         axes[2] = self.plot_benchmark_heatmap(
             df=slice_largest_not_preloaded_df,  # NOTE - if updating, also update caption in plot_benchmark_heatmap
+            metric_order=self.pynwb_read_order,
             ax=axes[2],
             title="Remote Slicing - Not Preloaded",
             vmin=0,
@@ -1621,6 +1651,7 @@ class BenchmarkVisualizer:
         )
         axes[3] = self.plot_benchmark_heatmap(
             df=slice_largest_preloaded_df,  # NOTE - if updating, also update caption in plot_benchmark_heatmap
+            metric_order=self.pynwb_read_order,
             ax=axes[3],
             title="Remote Slicing - Preloaded",
             vmin=0,
@@ -1631,7 +1662,7 @@ class BenchmarkVisualizer:
         caption = (
             f"Heatmap showing mean benchmark performance times (in seconds) across different data modalities. "
             "Each cell displays the average time for a specific method-modality combination. "
-            "The order is sorted by format type (lindi, zarr, hdf5) and then by average performance within each type. "
+            "Methods are shown in a fixed logical order for consistent comparison across panels. "
             "Stars (*) indicate the fastest method for each modality. "
             "For remote slicing, only the largest slice range was used to compute the averages, "
             "and preloaded and non-preloaded benchmark conditions are shown separately."
