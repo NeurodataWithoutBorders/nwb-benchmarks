@@ -234,6 +234,12 @@ class BenchmarkVisualizer:
         labels = [display_labels.get(method, method) for method in method_order]
         return labels
 
+    @staticmethod
+    def _display_method_label(method: str) -> str:
+        """Return display label for one backend or PyNWB benchmark method name."""
+        label = BenchmarkVisualizer._display_method_labels([method])[0]
+        return label
+
     def _write_summary_table(
         self,
         df: pd.DataFrame,
@@ -1142,6 +1148,8 @@ class BenchmarkVisualizer:
             g.map_dataframe(self._add_annotations_df, intersections_df=intersections_df, order=metric_order)
 
         g.set(xlabel="Relative slice size", ylabel="Time (s)")
+        if metric_order is not None:
+            sns.move_legend(g, "upper right", labels=self._display_method_labels(metric_order))
         sns.despine()
         plt.savefig(filename, dpi=300, bbox_inches="tight")
         plt.close()
@@ -1392,7 +1400,14 @@ class BenchmarkVisualizer:
         y_local = m2 * x_range + b2
 
         # Plot the fitted lines and mark intersection point
-        ax.plot(x_range, y_remote, color=color, linestyle="solid", linewidth=2, label=f"{benchmark_name}")
+        ax.plot(
+            x_range,
+            y_remote,
+            color=color,
+            linestyle="solid",
+            linewidth=2,
+            label=self._display_method_label(benchmark_name),
+        )
         if benchmark_name.startswith("hdf5"):
             download_color = sns.color_palette("Greens")[-1]
         elif benchmark_name.startswith("zarr"):
