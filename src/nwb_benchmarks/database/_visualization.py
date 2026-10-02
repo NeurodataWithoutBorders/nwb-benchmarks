@@ -1630,6 +1630,73 @@ class BenchmarkVisualizer:
         slice_largest_not_preloaded_df = slice_largest_df.filter(pl.col("is_preloaded") == False)
         slice_largest_preloaded_df = slice_largest_df.filter(pl.col("is_preloaded") == True)
 
+        # Compute and save the rankings of all methods across all benchmarks
+        file_open_to_pynwb_label = dict(zip(self.file_open_order, self.pynwb_read_order))
+
+        def compute_rank_table(
+            *,
+            df: pl.LazyFrame,
+            metric_order: List[str],
+            benchmark_label: str,
+            index_map: Optional[Dict[str, str]] = None,
+        ) -> pd.DataFrame:
+            heatmap_df = self._create_heatmap_df(df.collect(), "benchmark_name_clean", metric_order)
+            rank_df = heatmap_df.rank(axis=0, method="average", ascending=True)
+            if index_map is not None:
+                rank_df = rank_df.rename(index=index_map)
+            rank_df = rank_df.rename(columns={column: f"{benchmark_label}_{column}_rank" for column in rank_df.columns})
+            rank_df.index.name = "benchmark_name_clean"
+            return rank_df.reset_index()
+
+        rank_tables = [
+            compute_rank_table(
+                df=read_h5py_df,
+                metric_order=self.file_open_order,
+                benchmark_label="remote_file_opening",
+                index_map=file_open_to_pynwb_label,
+            ),
+            compute_rank_table(
+                df=read_pynwb_df,
+                metric_order=self.pynwb_read_order,
+                benchmark_label="remote_file_opening_pynwb",
+            ),
+            compute_rank_table(
+                df=slice_largest_not_preloaded_df,
+                metric_order=self.pynwb_read_order,
+                benchmark_label="remote_slicing_not_preloaded",
+            ),
+            compute_rank_table(
+                df=slice_largest_preloaded_df,
+                metric_order=self.pynwb_read_order,
+                benchmark_label="remote_slicing_preloaded",
+            ),
+        ]
+        method_rankings_summary = rank_tables[0]
+        for rank_table in rank_tables[1:]:
+            method_rankings_summary = method_rankings_summary.merge(rank_table, on="benchmark_name_clean", how="outer")
+        rank_columns = [column for column in method_rankings_summary.columns if column.endswith("_rank")]
+        method_rankings_summary["rank_average"] = method_rankings_summary[rank_columns].mean(axis=1)
+        method_rankings_summary["rank_median"] = method_rankings_summary[rank_columns].median(axis=1)
+        method_rankings_summary["rank_min"] = method_rankings_summary[rank_columns].min(axis=1)
+        method_rankings_summary["rank_max"] = method_rankings_summary[rank_columns].max(axis=1)
+        for modality in ["Ecephys", "Ophys", "Icephys"]:
+            modality_rank_columns = [column for column in rank_columns if f"_{modality}_rank" in column]
+            method_rankings_summary[f"rank_average_{modality}"] = method_rankings_summary[modality_rank_columns].mean(
+                axis=1
+            )
+            method_rankings_summary[f"rank_median_{modality}"] = method_rankings_summary[modality_rank_columns].median(
+                axis=1
+            )
+            method_rankings_summary[f"rank_min_{modality}"] = method_rankings_summary[modality_rank_columns].min(axis=1)
+            method_rankings_summary[f"rank_max_{modality}"] = method_rankings_summary[modality_rank_columns].max(axis=1)
+        if self.summary_tables_directory is not None:
+            method_rankings_summary.to_csv(
+                self.summary_tables_directory
+                / f"method_rankings_heatmap_method_ranks{self.environment_filename_postfix}_summary.csv",
+                index=False,
+            )
+
+        # Save the individal summary tables
         self._write_summary_table(
             df=read_h5py_df.collect().to_pandas(),
             group_cols=["benchmark_name_type", "benchmark_name_clean", "modality"],
@@ -1655,6 +1722,7 @@ class BenchmarkVisualizer:
             filename=f"method_rankings_heatmap_remote_slicing_preloaded_largest_range{self.environment_filename_postfix}_summary.csv",
         )
 
+        # Plot the 4 heatmaps
         fig, axes = plt.subplots(2, 2, figsize=(14, 14))
         axes = axes.flatten()
         axes[0] = self.plot_benchmark_heatmap(
@@ -1691,6 +1759,7 @@ class BenchmarkVisualizer:
             vmax=10,
         )
 
+        # Add subfigure labels
         for subfigure_label, ax in zip(["a)", "b)", "c)", "d)"], axes):
             ax.text(
                 -0.08,
@@ -1715,6 +1784,7 @@ class BenchmarkVisualizer:
         caption = self._add_environment_caption(caption)
         fig.text(0.5, -0.01, caption, ha="center", va="top", fontsize=9, wrap=True, style="italic")
 
+        # Save the figure
         plt.tight_layout()
         plt.savefig(self.output_directory / self._filename_with_environment_postfix("method_rankings_heatmap"), dpi=300)
         plt.close()
