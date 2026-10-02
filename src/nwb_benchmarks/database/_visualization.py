@@ -1655,7 +1655,8 @@ class BenchmarkVisualizer:
             filename=f"method_rankings_heatmap_remote_slicing_preloaded_largest_range{self.environment_filename_postfix}_summary.csv",
         )
 
-        fig, axes = plt.subplots(4, 1, figsize=(8, 20))
+        fig, axes = plt.subplots(2, 2, figsize=(14, 14))
+        axes = axes.flatten()
         axes[0] = self.plot_benchmark_heatmap(
             df=read_h5py_df,
             metric_order=self.file_open_order,
@@ -1689,6 +1690,18 @@ class BenchmarkVisualizer:
             vmin=0,
             vmax=10,
         )
+
+        for subfigure_label, ax in zip(["a)", "b)", "c)", "d)"], axes):
+            ax.text(
+                -0.08,
+                1.08,
+                subfigure_label,
+                transform=ax.transAxes,
+                fontsize=18,
+                fontweight="bold",
+                ha="left",
+                va="top",
+            )
 
         # Add figure caption
         caption = (
