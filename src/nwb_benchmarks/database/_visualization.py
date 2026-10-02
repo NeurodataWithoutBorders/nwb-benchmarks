@@ -233,12 +233,6 @@ class BenchmarkVisualizer:
         labels = [display_labels.get(method, method) for method in method_order]
         return labels
 
-    @classmethod
-    def _set_method_yticklabels(cls, ax: plt.Axes, method_order: List[str]) -> None:
-        """Apply display labels to a method y-axis while preserving its raw-method order."""
-        ax.set_yticks(range(len(method_order)))
-        ax.set_yticklabels(cls._display_method_labels(method_order))
-
     def _write_summary_table(
         self,
         df: pd.DataFrame,
@@ -998,7 +992,8 @@ class BenchmarkVisualizer:
         sns.heatmap(data=heatmap_df, annot=True, fmt=".3g", cmap="OrRd", ax=ax, vmin=vmin, vmax=vmax)
         ax.set(xlabel="", ylabel="")
         if group == "benchmark_name_clean":
-            self._set_method_yticklabels(ax, heatmap_df.index.tolist())
+            ax.set_yticks(np.arange(len(heatmap_df.index)) + 0.5)
+            ax.set_yticklabels(self._display_method_labels(heatmap_df.index.tolist()))
 
         # Add star for best method in each modality
         for j, col in enumerate(heatmap_df.columns):
@@ -1067,7 +1062,8 @@ class BenchmarkVisualizer:
             wrapped_title = "\n".join(textwrap.wrap(ax.get_title(), width=50))
             ax.set_title(wrapped_title)
             if group == "benchmark_name_clean" and metric_order is not None:
-                self._set_method_yticklabels(ax, metric_order)
+                ax.set_yticks(range(len(metric_order)))
+                ax.set_yticklabels(self._display_method_labels(metric_order))
 
         # Add figure caption
         if kind == "strip" and caption is not None:
@@ -1715,6 +1711,7 @@ class BenchmarkVisualizer:
             filename=f"performance_over_{benchmark_type}_summary.csv",
         )
 
+        method_order = self.pynwb_read_order if order is None else order
         g = sns.catplot(
             data=df,
             x="environment_timepoint",
@@ -1722,13 +1719,17 @@ class BenchmarkVisualizer:
             col="modality",
             row="is_preloaded" if benchmark_type == "time_remote_slicing" else None,
             hue="benchmark_name_clean",
-            hue_order=self.pynwb_read_order if order is None else order,
+            hue_order=method_order,
             order=sorted(df["environment_timepoint"].unique()),
             sharex=True,
             palette="Paired",
             sharey=False,
             kind="point",
         )
+        if g._legend is not None:
+            display_labels = dict(zip(method_order, self._display_method_labels(method_order)))
+            for text in g._legend.texts:
+                text.set_text(display_labels.get(text.get_text(), text.get_text()))
         g.set(xlabel="Environment timepoint", ylabel="Time (s)")
 
         # Add figure caption
