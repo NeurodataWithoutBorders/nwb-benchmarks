@@ -1,3 +1,4 @@
+import shutil
 import textwrap
 import warnings
 from collections import OrderedDict
@@ -259,6 +260,25 @@ class BenchmarkVisualizer:
             .reset_index()
         )
         summary_df.to_csv(self.summary_tables_directory / filename, index=False)
+
+    def copy_environment_details(
+        self, db: BenchmarkDatabase, environment_timepoints: Optional[Dict[str, str]] = None
+    ) -> None:
+        """Copy configured environment JSON files to the summary-table output directory."""
+        if self.summary_tables_directory is None:
+            return
+
+        environment_timepoints = environment_timepoints or ENVIRONMENT_TIMEPOINTS
+        environment_directory = db.results_directory / "environments"
+        for environment_date, environment_id in environment_timepoints.items():
+            source_path = environment_directory / f"environment-{environment_id}.json"
+            target_path = self.summary_tables_directory / f"environment_date_{environment_date}.json"
+            if not source_path.exists():
+                self._record_skipped_output(
+                    "environment details", target_path.name, f"Missing environment file: {source_path}."
+                )
+                continue
+            shutil.copy2(source_path, target_path)
 
     @staticmethod
     def _environment_date_map() -> Dict[str, str]:
@@ -1137,7 +1157,8 @@ class BenchmarkVisualizer:
         suffix: str = "_pynwb",
     ):
         """Plot read benchmark results."""
-        print(f"Plotting read benchmarks for {benchmark_type}...")
+        output_family = "PyNWB" if suffix == "_pynwb" else "backend"
+        print(f"Plotting {output_family} read benchmarks for {benchmark_type}...")
 
         filtered_df = db.filter_tests(benchmark_type).collect()
         prefix = self._get_filename_prefix(network_tracking)
@@ -1775,6 +1796,7 @@ class BenchmarkVisualizer:
         """Generate all benchmark visualization plots."""
         environment_timepoints = environment_timepoints or ENVIRONMENT_TIMEPOINTS
         environment_dates = list(environment_timepoints.keys())
+        self.copy_environment_details(db, environment_timepoints=environment_timepoints)
 
         # Generate ordinary plots for all configured environments together.
         configured_environment_ids = list(environment_timepoints.values())
