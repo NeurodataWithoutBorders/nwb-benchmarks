@@ -872,7 +872,7 @@ class BenchmarkVisualizer:
             .reset_index()
         )
         plot_df = runtime_summary.merge(network_summary, on=group_cols, how="inner")
-        plot_df = plot_df[(plot_df["runtime_median"] > 0) & (plot_df["network_median"] > 0)].copy()
+        plot_df = plot_df[(plot_df["runtime_mean"] > 0) & (plot_df["network_mean"] > 0)].copy()
         if plot_df.empty:
             self._record_skipped_output(
                 "plot",
@@ -910,8 +910,8 @@ class BenchmarkVisualizer:
                 }
                 if show_error_bars:
                     ax.errorbar(
-                        method_df["network_median"],
-                        method_df["runtime_median"],
+                        method_df["network_mean"],
+                        method_df["runtime_mean"],
                         xerr=method_df["network_std"].fillna(0),
                         yerr=method_df["runtime_std"].fillna(0),
                         elinewidth=0.7,
@@ -919,20 +919,20 @@ class BenchmarkVisualizer:
                         **plot_kwargs,
                     )
                 else:
-                    ax.plot(method_df["network_median"], method_df["runtime_median"], **plot_kwargs)
+                    ax.plot(method_df["network_mean"], method_df["runtime_mean"], **plot_kwargs)
                 largest_slice = method_df.iloc[-1]
                 ax.annotate(
                     str(int(largest_slice["slice_number"])),
-                    (largest_slice["network_median"], largest_slice["runtime_median"]),
+                    (largest_slice["network_mean"], largest_slice["runtime_mean"]),
                     xytext=(3, 3),
                     textcoords="offset points",
                     fontsize=7,
                     color=palette[method],
                 )
-            x_min = modality_df["network_median"].min()
-            x_max = modality_df["network_median"].max()
-            y_min = modality_df["runtime_median"].min()
-            y_max = modality_df["runtime_median"].max()
+            x_min = modality_df["network_mean"].min()
+            x_max = modality_df["network_mean"].max()
+            y_min = modality_df["runtime_mean"].min()
+            y_max = modality_df["runtime_mean"].max()
             if x_min > 0 and x_max > 0:
                 ax.set_xlim(x_min / 1.6, x_max * 1.6)
             if y_min > 0 and y_max > 0:
@@ -956,10 +956,11 @@ class BenchmarkVisualizer:
         )
         caption = (
             f"Remote slicing {metric_label.lower()} vs. runtime for increasing slice sizes ({preload_caption}). "
-            "Points show median benchmark measurements and connected lines follow increasing slice size within each method. "
+            "Points show average benchmark measurements and connected lines follow increasing slice size within each method. "
             "Text annotations mark the largest slice size shown for each method. "
             f"{error_bar_sentence}Panels separate data modalities."
         )
+        caption = self._add_environment_caption(caption)
         fig.text(0.02, 0.01, caption, ha="left", va="bottom", fontsize=9, wrap=True, style="italic")
         fig.tight_layout(rect=[0, 0.12, 0.90, 1.0])
         fig.savefig(filename, bbox_inches="tight")
@@ -1007,7 +1008,7 @@ class BenchmarkVisualizer:
             .reset_index()
         )
         plot_df = runtime_summary.merge(network_summary, on=group_cols, how="inner")
-        plot_df = plot_df[(plot_df["runtime_median"] > 0) & (plot_df["network_median"] > 0)].copy()
+        plot_df = plot_df[(plot_df["runtime_mean"] > 0) & (plot_df["network_mean"] > 0)].copy()
         if plot_df.empty:
             self._record_skipped_output(
                 "plot",
@@ -1031,12 +1032,18 @@ class BenchmarkVisualizer:
             method_df["modality"] = pd.Categorical(method_df["modality"], categories=modality_order, ordered=True)
             method_df = method_df.sort_values("modality")
             ax.plot(
-                method_df["network_median"],
-                method_df["runtime_median"],
+                method_df["network_mean"],
+                method_df["runtime_mean"],
                 color=palette[method],
                 linewidth=1.2,
                 alpha=0.75,
             )
+            title = "Remote File Opening"
+            if suffix == "_pynwb":
+                title += " - PyNWB"
+            elif suffix:
+                title += suffix
+            ax.set_title(title)
             for modality in modality_order:
                 modality_df = method_df[method_df["modality"].eq(modality)]
                 if modality_df.empty:
@@ -1050,8 +1057,8 @@ class BenchmarkVisualizer:
                 }
                 if show_error_bars:
                     ax.errorbar(
-                        modality_df["network_median"],
-                        modality_df["runtime_median"],
+                        modality_df["network_mean"],
+                        modality_df["runtime_mean"],
                         xerr=modality_df["network_std"].fillna(0),
                         yerr=modality_df["runtime_std"].fillna(0),
                         elinewidth=0.7,
@@ -1059,7 +1066,7 @@ class BenchmarkVisualizer:
                         **plot_kwargs,
                     )
                 else:
-                    ax.plot(modality_df["network_median"], modality_df["runtime_median"], **plot_kwargs)
+                    ax.plot(modality_df["network_mean"], modality_df["runtime_mean"], **plot_kwargs)
         ax.set_xscale("log")
         ax.set_yscale("log")
         ax.grid(True, which="both", linewidth=0.3, alpha=0.35)
@@ -1081,10 +1088,11 @@ class BenchmarkVisualizer:
         )
         caption = (
             f"Network-tracking {output_family} {metric_label.lower()} vs. runtime. "
-            "Points show median benchmark measurements. "
+            "Points show average benchmark measurements. "
             "Connected lines link modalities within each method. "
             f"{error_bar_sentence}Marker shapes distinguish modalities."
         )
+        caption = self._add_environment_caption(caption)
         fig.text(0.02, 0.01, caption, ha="left", va="bottom", fontsize=9, wrap=True, style="italic")
         fig.tight_layout(rect=[0, 0.12, 1.0, 1.0])
         fig.savefig(filename, bbox_inches="tight")
