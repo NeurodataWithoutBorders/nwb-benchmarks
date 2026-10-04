@@ -1,15 +1,14 @@
 import itertools
 
-from ..globals import (
-    ENVIRONMENTS_DIR,
-    LOGS_DIR,
-    MACHINES_DIR,
-    RESULTS_DIR,
-)
 from ..setup import get_benchmarks_home_directory
 
 
 def clean_results():
+    # Imported here rather than at module level: `globals` imports `setup`, and `setup` imports
+    # `globals` while collecting machine info, so `globals` must never be the first of the two to
+    # be imported. Importing `setup` above guarantees the order.
+    from ..globals import ENVIRONMENTS_DIR, LOGS_DIR, MACHINES_DIR, RESULTS_DIR
+
     # Left behind by versions that uploaded results to the retired web server
     upload_tracker_file_path = get_benchmarks_home_directory() / "upload_tracker.json"
     upload_tracker_file_path.unlink(missing_ok=True)
