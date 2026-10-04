@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 from nwb_benchmarks.core import get_https_url
 
 ################################### BASE PARAMETERS ###################################
@@ -5,33 +7,15 @@ hdf5_ecephys_params = dict(
     dandiset_id="000717",
     dandi_path="sub-npI3/sub-npI3_behavior+ecephys.nwb",
 )
-hdf5_ecephys_params["https_url_redirected"] = get_https_url(
-    hdf5_ecephys_params["dandiset_id"], hdf5_ecephys_params["dandi_path"], follow_redirects=1
-)
-hdf5_ecephys_params["https_url_no_redirect"] = get_https_url(
-    hdf5_ecephys_params["dandiset_id"], hdf5_ecephys_params["dandi_path"], follow_redirects=False
-)
 
 hdf5_ophys_params = dict(
     dandiset_id="000717",
     dandi_path="sub-R6/sub-R6_behavior+ophys.nwb",
 )
-hdf5_ophys_params["https_url_redirected"] = get_https_url(
-    hdf5_ophys_params["dandiset_id"], hdf5_ophys_params["dandi_path"], follow_redirects=1
-)
-hdf5_ophys_params["https_url_no_redirect"] = get_https_url(
-    hdf5_ophys_params["dandiset_id"], hdf5_ophys_params["dandi_path"], follow_redirects=False
-)
 
 hdf5_icephys_params = dict(
     dandiset_id="000717",
     dandi_path="sub-1214579789_ses-1214621812_icephys/sub-1214579789_ses-1214621812_icephys.nwb",
-)
-hdf5_icephys_params["https_url_redirected"] = get_https_url(
-    hdf5_icephys_params["dandiset_id"], hdf5_icephys_params["dandi_path"], follow_redirects=1
-)
-hdf5_icephys_params["https_url_no_redirect"] = get_https_url(
-    hdf5_icephys_params["dandiset_id"], hdf5_icephys_params["dandi_path"], follow_redirects=False
 )
 
 # The Zarr https_url_directs point directly to the S3 URL for Zarr access - copied from the DANDI asset page
@@ -42,9 +26,6 @@ zarr_ecephys_params = dict(
 zarr_ecephys_params["https_url_direct"] = (
     "https://dandiarchive.s3.amazonaws.com/zarr/d097af6b-8fd8-4d83-b649-fc6518e95d25/"
 )
-zarr_ecephys_params["https_url_no_redirect"] = get_https_url(
-    zarr_ecephys_params["dandiset_id"], zarr_ecephys_params["dandi_path"], follow_redirects=False
-)
 
 zarr_ophys_params = dict(
     dandiset_id="000719",
@@ -52,9 +33,6 @@ zarr_ophys_params = dict(
 )
 zarr_ophys_params["https_url_direct"] = (
     "https://dandiarchive.s3.amazonaws.com/zarr/c8c6b848-fbc6-4f58-85ff-e3f2618ee983/"
-)
-zarr_ophys_params["https_url_no_redirect"] = get_https_url(
-    zarr_ophys_params["dandiset_id"], zarr_ophys_params["dandi_path"], follow_redirects=False
 )
 
 zarr_icephys_params = dict(
@@ -64,33 +42,47 @@ zarr_icephys_params = dict(
 zarr_icephys_params["https_url_direct"] = (
     "https://dandiarchive.s3.amazonaws.com/zarr/18e75d22-f527-4051-a4c8-c7e0f1e7dad1/"
 )
-zarr_icephys_params["https_url_no_redirect"] = get_https_url(
-    zarr_icephys_params["dandiset_id"], zarr_icephys_params["dandi_path"], follow_redirects=False
-)
 
 lindi_ecephys_params = dict(
     dandiset_id="213889",
     dandi_path="sub-npI3/sub-npI3_behavior+ecephys.nwb.lindi.json",
-)
-lindi_ecephys_params["https_url_no_redirect"] = get_https_url(
-    lindi_ecephys_params["dandiset_id"], lindi_ecephys_params["dandi_path"], follow_redirects=False
 )
 
 lindi_ophys_params = dict(
     dandiset_id="213889",
     dandi_path="sub-R6/sub-R6_behavior+ophys.nwb.lindi.json",
 )
-lindi_ophys_params["https_url_no_redirect"] = get_https_url(
-    lindi_ophys_params["dandiset_id"], lindi_ophys_params["dandi_path"], follow_redirects=False
-)
 
 lindi_icephys_params = dict(
     dandiset_id="213889",
     dandi_path="sub-1214579789_ses-1214621812_icephys/sub-1214579789_ses-1214621812_icephys.lindi.json",
 )
-lindi_icephys_params["https_url_no_redirect"] = get_https_url(
-    lindi_icephys_params["dandiset_id"], lindi_icephys_params["dandi_path"], follow_redirects=False
-)
+
+
+def _resolve_https_urls(params: dict, redirected: bool) -> None:
+    """Add the download URL(s) of the asset described by `params`, resolved through the DANDI API."""
+    if redirected:
+        params["https_url_redirected"] = get_https_url(params["dandiset_id"], params["dandi_path"], follow_redirects=1)
+    params["https_url_no_redirect"] = get_https_url(params["dandiset_id"], params["dandi_path"], follow_redirects=False)
+
+
+# Resolving each URL takes several DANDI API requests, and ASV imports this module in every process it starts
+# (benchmark discovery and the benchmark fork server), so resolve all assets concurrently instead of one by one
+_assets_to_resolve = [
+    (hdf5_ecephys_params, True),
+    (hdf5_ophys_params, True),
+    (hdf5_icephys_params, True),
+    (zarr_ecephys_params, False),
+    (zarr_ophys_params, False),
+    (zarr_icephys_params, False),
+    (lindi_ecephys_params, False),
+    (lindi_ophys_params, False),
+    (lindi_icephys_params, False),
+]
+with ThreadPoolExecutor(max_workers=len(_assets_to_resolve)) as _executor:
+    _futures = [_executor.submit(_resolve_https_urls, params, redirected) for params, redirected in _assets_to_resolve]
+    for _future in _futures:
+        _future.result()  # Re-raise any failure so a bad lookup still stops the import
 
 ################################### REMOTE FILE READ PARAMETERS ###################################
 hdf5_redirected_read_params = (

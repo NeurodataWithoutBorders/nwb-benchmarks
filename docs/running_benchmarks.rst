@@ -70,6 +70,13 @@ For example,
 
     nwb_benchmarks run --bench time_remote_file_reading.HDF5H5pyFileReadBenchmark.time_read_hdf5_h5py_remfile_no_cache
 
+The value is a regular expression that ASV matches against ``module.Class.method({parameters})``, so it can also
+select a single parameter set of a benchmark. For example, to run only the ophys case of a benchmark...
+
+.. code-block::
+
+    nwb_benchmarks run --bench "time_remote_file_reading.HDF5H5pyFileReadBenchmark.time_read_hdf5_h5py_remfile_no_cache\(\{'name': 'OphysTestCase'"
+
 Debug mode
 ~~~~~~~~~~
 

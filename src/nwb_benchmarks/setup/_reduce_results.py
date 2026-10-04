@@ -4,6 +4,7 @@ import collections
 import datetime
 import hashlib
 import json
+import math
 import pathlib
 import shutil
 import subprocess
@@ -52,19 +53,30 @@ def reduce_results(machine_id: str, raw_results_file_path: pathlib.Path, raw_env
         assert len(raw_results_list[1]) == 1, "Unexpected length of serialized parameters list!"
         serialized_params = raw_results_list[1][0]
 
-        # Skipped results in JSON are writen as `null` and read back into Python as `None`
-        non_skipped_results = [result for result in raw_results_list[11] if result is not None]
-        if len(serialized_params) != len(non_skipped_results):
+        # ASV records every parameter set of a benchmark, including those a `--bench` pattern did not select.
+        # Those were never run and have a NaN result, so leave them out before pairing parameters with samples.
+        selected = [
+            (params, samples)
+            for params, result, samples in zip(serialized_params, raw_results_list[0], raw_results_list[11])
+            if not (isinstance(result, float) and math.isnan(result))
+        ]
+        if len(selected) == 0:
+            continue
+        selected_params = [params for params, _ in selected]
+
+        # Samples of parameter sets that failed are written as `null` and read back into Python as `None`
+        non_skipped_results = [samples for _, samples in selected if samples is not None]
+        if len(selected_params) != len(non_skipped_results):
             message = (
                 f"In intermediate results for test case {test_case}: \n"
-                f"\tLength mismatch between parameters ({len(serialized_params)}) and "
+                f"\tLength mismatch between parameters ({len(selected_params)}) and "
                 f"result samples ({len(non_skipped_results)})!\n\n"
                 "Please raise an issue and share your intermediate results file."
             )
             warnings.warn(message=message)
         else:
             reduced_results.update(
-                {test_case: {params: raw_result for params, raw_result in zip(serialized_params, non_skipped_results)}}
+                {test_case: {params: raw_result for params, raw_result in zip(selected_params, non_skipped_results)}}
             )
 
     if len(reduced_results) == 0:
