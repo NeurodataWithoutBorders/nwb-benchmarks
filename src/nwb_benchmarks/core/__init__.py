@@ -2,6 +2,7 @@
 
 from ._base_benchmark import BaseBenchmark
 from ._capture_connections import CaptureConnections
+from ._clean_results import clean_results
 from ._dandi import download_asset_if_not_exists, get_asset_path_from_url, get_https_url
 from ._network_profiler import NetworkProfiler
 from ._network_statistics import NetworkStatistics
@@ -32,7 +33,6 @@ from ._streaming import (
     read_zarr_zarrpython_s3,
     robust_ros3_read,
 )
-from ._upload_and_clean_results import clean_results, upload_results
 
 __all__ = [
     "BaseBenchmark",
@@ -68,5 +68,4 @@ __all__ = [
     "read_zarr_zarrpython_https",
     "read_zarr_zarrpython_s3",
     "robust_ros3_read",
-    "upload_results",
 ]
