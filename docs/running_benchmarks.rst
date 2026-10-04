@@ -89,23 +89,46 @@ If you want to get a full traceback to examine why a new test might be failing, 
 Setting this flag will also override the ``repeat`` parameter of benchmarks and set it to 1, so that you can quickly
 iterate on the code and see the results of your changes without having to wait for the full suite to run.
 
-Setting this flag will also not write results to the local cached results directory or upload results to the central
-database automatically.
+Setting this flag will also skip the reminder about contributing results, since debug runs are not meant to be shared.
 
 Contributing Results
 --------------------
 
-All results should be automatically posted to the central database found on `GitHub <https://github.com/NeurodataWithoutBorders/nwb-benchmarks-results>`_.
+Each successful ``nwb_benchmarks run`` writes three kinds of JSON files under ``~/.nwb_benchmarks``:
 
-If this fails, you can contribute your results manually by:
+* ``results/`` holds the measurements of each run,
+* ``machines/`` and ``environments/`` hold the hardware and package descriptions the results refer to (written
+  once per unique configuration).
+
+Results from all contributors are collected in the central
+`nwb-benchmarks-results <https://github.com/NeurodataWithoutBorders/nwb-benchmarks-results>`_ repository, which
+mirrors these three folders. There are two ways to get your files there.
+
+Automated runs
+~~~~~~~~~~~~~~
+
+Machines that run the suite regularly should be registered as self-hosted GitHub Actions runners of the
+`nwb-benchmarks-runner <https://github.com/NeurodataWithoutBorders/nwb-benchmarks-runner>`_ repository. Its scheduled
+workflows run the suite, then commit the new files to the central repository using a token that you provide, so
+results can be contributed by many people without sharing credentials. See that repository's README for the
+setup steps.
+
+Manual contribution
+~~~~~~~~~~~~~~~~~~~
+
+For one-off runs, open a pull request against the central repository:
 
 .. code-block::
 
     <Fork https://github.com/NeurodataWithoutBorders/nwb-benchmarks-results on GitHub>
     git clone https://github.com/<your GitHub username>/nwb-benchmarks-results
+    cd nwb-benchmarks-results
     git checkout -b new_results_from_<...>
-    <copy results from ~/.cache/nwb_benchmarks/results>
-    git commit -m "New results from ...." .
+    cp ~/.nwb_benchmarks/results/*.json results/
+    cp ~/.nwb_benchmarks/machines/*.json machines/
+    cp ~/.nwb_benchmarks/environments/*.json environments/
+    git add results machines environments
+    git commit -m "New results from ...."
     git push
 
 Then, open a PR to merge the results to the ``main`` branch of the central repo.
@@ -113,7 +136,7 @@ Then, open a PR to merge the results to the ``main`` branch of the central repo.
 .. note::
 
     When running tests with ``sudo`` the new results may be owned by ``root``. To avoid having to run pre-commit hooks
-in sudo you may need to change the owner of the results first, e.g., via ``sudo chown -R <new_owner> results``.
+    in sudo you may need to change the owner of the results first, e.g., via ``sudo chown -R <new_owner> ~/.nwb_benchmarks``.
 
 .. note::
 

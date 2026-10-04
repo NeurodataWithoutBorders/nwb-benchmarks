@@ -9,7 +9,7 @@ import subprocess
 import sys
 import warnings
 
-from .core import clean_results, upload_results
+from .core import clean_results
 from .globals import LOGS_DIR
 from .setup import (
     clean_cache,
@@ -192,11 +192,12 @@ def main() -> None:
             )
 
             if not debug_mode:
-                upload_results()
+                print(
+                    "To contribute these results, see "
+                    "https://nwb-benchmarks.readthedocs.io/en/latest/running_benchmarks.html#contributing-results\n"
+                )
         finally:
             clean_cache()
-    elif command == "upload":
-        upload_results()
     elif command == "clean":
         clean_results()
         clean_cache()
@@ -230,7 +231,6 @@ def main() -> None:
         print(f"{command} is an invalid command.")
         print("\nAvailable commands:")
         print("  run                - Run benchmarks")
-        print("  upload             - Upload results")
         print("  clean              - Clean results and cache")
         print("  config_set_cache   - Set cache directory")
         print("  generate_figures   - Generate manuscript figures")

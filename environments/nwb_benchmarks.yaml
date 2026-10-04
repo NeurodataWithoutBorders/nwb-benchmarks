@@ -12,7 +12,6 @@ dependencies:
       - dandi
       - fsspec
       - s3fs
-      - requests
       - aiohttp
       - remfile
       - pyshark

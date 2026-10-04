@@ -8,9 +8,7 @@ Environment Setup
 ------------
 
 To setup a development environment, use ``pip install -e . --group all`` to install all dependencies including those for development and testing.
-This command will install all packages required for the flask app, database management, and dev testing.
-
-If you would like to run the flask app in debug mode, set the environment variable ``NWB_BENCHMARKS_DEBUG=1``.
+This command will install all packages required for database management, figure generation, and dev testing.
 
 
 Coding Style
@@ -124,45 +122,3 @@ which is also indented for improved human readability and line-by-line GitHub tr
 
 
 .. include:: network_tracking.rst
-
-
-Managing Web Server
--------------------
-
-While the instructions for contributing results manually to the GitHub repository should always work as expected, it
-is nonetheless convenient to have a web server to automatically manage the upload of results and the display of
-existing results.
-
-To accomplish this, we run the Flask app in `PythonAnywhere <https://www.pythonanywhere.com/>`_. To use this free
-service, create an account and start a new web app. Go to the source code for the web app, make a new file called
-``flask_app.py`` and copy the code for the Flask app into this file. Then go to the WSGI configuration file for the
-web app and add the following code at the end of the file...
-
-.. code-block:: python
-
-    # import flask app but need to call it "application" for WSGI to work
-    from flask_app import app as application  # noqa
-
-Then reload the web app from the main dashboard. You should be able to navigate to the url of the app and navigate
-the Swagger view of the endpoints.
-
-The Flask app relies on two externally setup GitHub-backed file stores. Go to your GitHub developer settings and
-generate a new token for this purpose. Then open a console on PythonAnywhere and navigate to ``~/
-.cache``. Within this directory, run the following commands...
-
-.. code-block:: bash
-
-    mkdir nwb-benchmarks
-    cd nwb-benchmarks
-    git clone https://<token>@github.com/neurodatawithoutborders/nwb-benchmarks-results
-    cd nwb-benchmarks-results
-    git config --local user.email "github-actions[bot]@users.noreply.github.com"
-    git config --local user.name "github-actions[bot]"
-    cd ..
-    git clone https://<token>@github.com/neurodatawithoutborders/nwb-benchmarks-database
-    cd nwb-benchmarks-database
-    git config --local user.email "github-actions[bot]@users.noreply.github.com"
-    git config --local user.name "github-actions[bot]"
-    cd ..
-
-Test out the web app by posting some results JSON packets to the ``/contribute`` endpoint.
