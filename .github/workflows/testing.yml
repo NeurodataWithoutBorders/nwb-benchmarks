@@ -28,12 +28,28 @@ jobs:
           BRANCH="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
           git checkout $BRANCH
 
-      - name: Install special conda environment
+      - name: Install conda
         uses: conda-incubator/setup-miniconda@v2
         with:
           activate-environment: nwb_benchmarks
-          environment-file: nwb_benchmarks/environments/nwb_benchmarks.yaml
           auto-activate-base: false
+
+      - name: Get the ISO week for the environment cache key
+        id: week
+        run: echo "week=$(date -u '+%G-W%V')" >> "$GITHUB_OUTPUT"
+
+      # Reuse the environment built by an earlier run with the same dependency files. The pip dependencies are
+      # unpinned, so the key also includes the ISO week to pick up new upstream releases at least weekly.
+      - name: Restore cached conda environment
+        id: env-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CONDA }}/envs/nwb_benchmarks
+          key: conda-env-${{ runner.os }}-${{ runner.arch }}-${{ steps.week.outputs.week }}-${{ hashFiles('nwb_benchmarks/environments/nwb_benchmarks.yaml', 'nwb_benchmarks/pyproject.toml') }}
+
+      - name: Install special conda environment
+        if: steps.env-cache.outputs.cache-hit != 'true'
+        run: conda env update --name nwb_benchmarks --file nwb_benchmarks/environments/nwb_benchmarks.yaml
 
       - name: Display installed packages and their sources for debugging
         run: |
