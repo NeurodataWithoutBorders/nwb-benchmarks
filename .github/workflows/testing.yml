@@ -59,8 +59,8 @@ jobs:
           conda info
           conda list
 
-      # `params.py` hardcodes the DANDI URLs so that importing the benchmark suite makes no network requests. Check they
-      # still match what the DANDI API resolves to, so a replaced asset shows up here instead of inside a benchmark.
+      # `params.py` hardcodes the DANDI API download URLs so that importing the benchmark suite does not look every asset
+      # up. Check they still match what the API resolves to, so a replaced asset shows up here instead of in a benchmark.
       - name: Check the hardcoded DANDI URLs are current
         working-directory: nwb_benchmarks
         run: python -m nwb_benchmarks.scripts.check_dandi_urls

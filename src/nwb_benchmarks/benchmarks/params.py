@@ -1,17 +1,19 @@
-# The DANDI URLs in this module are literals so that importing the benchmark suite, which ASV does in every process it
-# starts, makes no network requests. They were resolved with `nwb_benchmarks.core.get_https_url`: `https_url_redirected`
-# follows the DANDI download URL one hop to the S3 blob (`follow_redirects=1`) and `https_url_no_redirect` is the DANDI
-# API download URL of the asset (`follow_redirects=False`). The CI workflow checks that they still match what the DANDI
-# API resolves to (`python -m nwb_benchmarks.scripts.check_dandi_urls`); if an asset is replaced on DANDI, run that
-# script and update the URLs it reports.
+# The DANDI API download URLs in this module (`https_url_no_redirect`) are literals, resolved once with
+# `nwb_benchmarks.core.get_https_url(..., follow_redirects=False)`, so that importing the benchmark suite, which ASV does
+# in every process it starts, does not look every asset up through the DANDI API. The S3 locations those URLs redirect
+# to (`https_url_redirected`) are storage details rather than a stable interface, so they are still resolved at import
+# with `follow_redirects=1`. The CI workflow checks that the literals still match what the DANDI API resolves to
+# (`python -m nwb_benchmarks.scripts.check_dandi_urls`); if an asset is replaced on DANDI, run that script and update
+# the URLs it reports.
+from nwb_benchmarks.core import get_https_url
 
 ################################### BASE PARAMETERS ###################################
 hdf5_ecephys_params = dict(
     dandiset_id="000717",
     dandi_path="sub-npI3/sub-npI3_behavior+ecephys.nwb",
 )
-hdf5_ecephys_params["https_url_redirected"] = (
-    "https://dandiarchive.s3.amazonaws.com/blobs/30c/6cc/30c6cc7b-4d17-4237-9786-66623a6c65eb"
+hdf5_ecephys_params["https_url_redirected"] = get_https_url(
+    hdf5_ecephys_params["dandiset_id"], hdf5_ecephys_params["dandi_path"], follow_redirects=1
 )
 hdf5_ecephys_params["https_url_no_redirect"] = (
     "https://api.dandiarchive.org/api/assets/df0e074e-3509-4b03-908e-2a1303072707/download/"
@@ -21,8 +23,8 @@ hdf5_ophys_params = dict(
     dandiset_id="000717",
     dandi_path="sub-R6/sub-R6_behavior+ophys.nwb",
 )
-hdf5_ophys_params["https_url_redirected"] = (
-    "https://dandiarchive.s3.amazonaws.com/blobs/bee/852/bee85254-7ba5-4719-9daf-80345646208c"
+hdf5_ophys_params["https_url_redirected"] = get_https_url(
+    hdf5_ophys_params["dandiset_id"], hdf5_ophys_params["dandi_path"], follow_redirects=1
 )
 hdf5_ophys_params["https_url_no_redirect"] = (
     "https://api.dandiarchive.org/api/assets/c15b3e06-f443-4964-a6b0-c44c367d830b/download/"
@@ -32,8 +34,8 @@ hdf5_icephys_params = dict(
     dandiset_id="000717",
     dandi_path="sub-1214579789_ses-1214621812_icephys/sub-1214579789_ses-1214621812_icephys.nwb",
 )
-hdf5_icephys_params["https_url_redirected"] = (
-    "https://dandiarchive.s3.amazonaws.com/blobs/c98/3a4/c983a4e1-097a-402c-bda8-e6a41cb7e24a"
+hdf5_icephys_params["https_url_redirected"] = get_https_url(
+    hdf5_icephys_params["dandiset_id"], hdf5_icephys_params["dandi_path"], follow_redirects=1
 )
 hdf5_icephys_params["https_url_no_redirect"] = (
     "https://api.dandiarchive.org/api/assets/471ef39b-806c-4946-80b5-125b55839854/download/"

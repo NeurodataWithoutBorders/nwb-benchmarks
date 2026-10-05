@@ -10,8 +10,9 @@ import sys
 from nwb_benchmarks.benchmarks import params
 from nwb_benchmarks.core import get_https_url
 
-# How each hardcoded key was resolved: the `follow_redirects` argument passed to `get_https_url`
-FOLLOW_REDIRECTS_BY_KEY = {"https_url_redirected": 1, "https_url_no_redirect": False}
+# The hardcoded keys and the `follow_redirects` argument each was resolved with; `https_url_redirected` is resolved at
+# import time rather than hardcoded, so it is not checked here
+FOLLOW_REDIRECTS_BY_KEY = {"https_url_no_redirect": False}
 
 
 def main() -> int:
