@@ -1,6 +1,7 @@
 import shutil
 import textwrap
 import warnings
+import zlib
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -65,6 +66,8 @@ NETWORK_METRIC_LABELS = {
     "total_transfer_in_number_of_packets": "Total transfer packets",
     "total_transfer_time_in_seconds": "Total transfer time (s)",
 }
+
+BYTE_NETWORK_METRICS = {metric for metric in NETWORK_METRIC_LABELS if metric.endswith("_in_bytes")}
 
 
 class BenchmarkVisualizer:
@@ -262,11 +265,13 @@ class BenchmarkVisualizer:
     @staticmethod
     def _method_palette(methods: List[str]) -> Dict[str, Any]:
         """Return a stable method-to-color mapping for the requested benchmark methods."""
-        fallback_colors = iter(sns.color_palette("colorblind", n_colors=len(methods)))
+        fallback_colors = sns.color_palette("husl", n_colors=256)
         palette = {}
         for method in methods:
             palette[method] = (
-                DEFAULT_METHOD_COLORS[method] if method in DEFAULT_METHOD_COLORS else next(fallback_colors)
+                DEFAULT_METHOD_COLORS[method]
+                if method in DEFAULT_METHOD_COLORS
+                else fallback_colors[zlib.crc32(method.encode("utf-8")) % len(fallback_colors)]
             )
         return palette
 
@@ -1017,7 +1022,8 @@ class BenchmarkVisualizer:
                 ax.set_ylim(y_min / 1.6, y_max * 1.6)
             ax.set_xscale("log")
             ax.set_yscale("log")
-            self._add_throughput_lines(ax, rates_mb_s=(1, 10, 100))
+            if network_metric in BYTE_NETWORK_METRICS:
+                self._add_throughput_lines(ax, rates_mb_s=(1, 10, 100))
             ax.set_title(modality, y=1.08)
             ax.grid(True, which="both", linewidth=0.3, alpha=0.35)
             ax.set_xlabel(NETWORK_METRIC_LABELS.get(network_metric, network_metric))
@@ -1033,11 +1039,16 @@ class BenchmarkVisualizer:
         error_bar_sentence = (
             "Error bars show standard deviation across repeated benchmark runs. " if show_error_bars else ""
         )
+        throughput_caption = (
+            "Dashed gray lines indicate constant effective throughput. "
+            if network_metric in BYTE_NETWORK_METRICS
+            else ""
+        )
         caption = (
             f"Remote slicing {metric_label.lower()} vs. runtime for increasing slice sizes ({preload_caption}). "
             "Points show average benchmark measurements and connected lines follow increasing slice size within each method. "
             "Text annotations mark the largest slice size shown for each method. "
-            "Dashed gray lines indicate constant effective throughput. "
+            f"{throughput_caption}"
             f"{error_bar_sentence}Panels separate data modalities."
         )
         caption = self._add_environment_caption(caption)
@@ -1149,8 +1160,9 @@ class BenchmarkVisualizer:
                     ax.plot(modality_df["network_mean"], modality_df["runtime_mean"], **plot_kwargs)
         ax.set_xscale("log")
         ax.set_yscale("log")
-        throughput_rates = (0.01, 0.1, 1, 10) if suffix == "_pynwb" else (0.1, 1, 10)
-        self._add_throughput_lines(ax, rates_mb_s=throughput_rates)
+        if network_metric in BYTE_NETWORK_METRICS:
+            throughput_rates = (0.01, 0.1, 1, 10) if suffix == "_pynwb" else (0.1, 1, 10)
+            self._add_throughput_lines(ax, rates_mb_s=throughput_rates)
         ax.grid(True, which="both", linewidth=0.3, alpha=0.35)
         ax.set_xlabel(NETWORK_METRIC_LABELS.get(network_metric, network_metric))
         ax.set_ylabel("Runtime (s)")
@@ -1168,11 +1180,16 @@ class BenchmarkVisualizer:
         error_bar_sentence = (
             "Error bars show standard deviation across repeated benchmark runs. " if show_error_bars else ""
         )
+        throughput_caption = (
+            "Dashed gray lines indicate constant effective throughput. "
+            if network_metric in BYTE_NETWORK_METRICS
+            else ""
+        )
         caption = (
             f"Network-tracking {output_family} {metric_label.lower()} vs. runtime. "
             "Points show average benchmark measurements. "
             "Connected lines link modalities within each method. "
-            "Dashed gray lines indicate constant effective throughput. "
+            f"{throughput_caption}"
             f"{error_bar_sentence}Marker shapes distinguish modalities."
         )
         caption = self._add_environment_caption(caption)
