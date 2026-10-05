@@ -838,6 +838,266 @@ class BenchmarkVisualizer:
         plt.savefig(self.output_directory / filename, dpi=300, bbox_inches="tight")
         plt.close()
 
+    def _plot_slicing_network_runtime_trajectories(
+        self,
+        runtime_df: pd.DataFrame,
+        network_df: pd.DataFrame,
+        preload_value: bool,
+        preload_label: str,
+        preload_caption: str,
+        col_name: str,
+        network_metric: str = "total_transfer_in_bytes",
+        show_error_bars: bool = False,
+    ) -> None:
+        """Plot a network metric against runtime for increasing slice sizes."""
+        metric_filename_label = network_metric
+        filename = self.output_directory / self._filename_with_environment_postfix(
+            f"slicing_{metric_filename_label}_runtime_trajectory_{preload_label}"
+        )
+        if runtime_df.empty or network_df.empty:
+            self._record_skipped_output("plot", filename.name, "Missing runtime or network slicing data.")
+            return
+
+        group_cols = ["slice_number", "is_preloaded", col_name, "modality"]
+        runtime_summary = (
+            runtime_df[runtime_df["is_preloaded"].eq(preload_value)]
+            .groupby(group_cols, dropna=False)["value"]
+            .agg(runtime_median="median", runtime_mean="mean", runtime_std="std", runtime_n="count")
+            .reset_index()
+        )
+        network_summary = (
+            network_df[network_df["is_preloaded"].eq(preload_value) & network_df["variable"].eq(network_metric)]
+            .groupby(group_cols, dropna=False)["value"]
+            .agg(network_median="median", network_mean="mean", network_std="std", network_n="count")
+            .reset_index()
+        )
+        plot_df = runtime_summary.merge(network_summary, on=group_cols, how="inner")
+        plot_df = plot_df[(plot_df["runtime_mean"] > 0) & (plot_df["network_mean"] > 0)].copy()
+        if plot_df.empty:
+            self._record_skipped_output(
+                "plot",
+                filename.name,
+                f"No positive paired runtime and {network_metric} measurements for {preload_caption} slicing.",
+            )
+            return
+
+        if self.summary_tables_directory is not None:
+            plot_df.to_csv(self.summary_tables_directory / f"{filename.stem}_summary.csv", index=False)
+
+        modality_order = ["Ecephys", "Ophys", "Icephys"]
+        methods = [method for method in self.pynwb_read_order if method in set(plot_df[col_name])]
+        methods.extend([method for method in plot_df[col_name].dropna().unique() if method not in methods])
+        palette = dict(zip(methods, sns.color_palette("colorblind", n_colors=len(methods))))
+        fig, axes = plt.subplots(1, len(modality_order), figsize=(15, 5), sharex=False, sharey=False)
+        for ax, modality in zip(axes, modality_order):
+            modality_df = plot_df[plot_df["modality"].eq(modality)]
+            if modality_df.empty:
+                ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
+                ax.set_axis_off()
+                continue
+            for method in methods:
+                method_df = modality_df[modality_df[col_name].eq(method)].sort_values("slice_number")
+                if method_df.empty:
+                    continue
+                label = self._display_method_label(method)
+                plot_kwargs = {
+                    "marker": "o",
+                    "markersize": 4,
+                    "linewidth": 1.2,
+                    "color": palette[method],
+                    "alpha": 0.85,
+                    "label": label,
+                }
+                if show_error_bars:
+                    ax.errorbar(
+                        method_df["network_mean"],
+                        method_df["runtime_mean"],
+                        xerr=method_df["network_std"].fillna(0),
+                        yerr=method_df["runtime_std"].fillna(0),
+                        elinewidth=0.7,
+                        capsize=2,
+                        **plot_kwargs,
+                    )
+                else:
+                    ax.plot(method_df["network_mean"], method_df["runtime_mean"], **plot_kwargs)
+                largest_slice = method_df.iloc[-1]
+                ax.annotate(
+                    str(int(largest_slice["slice_number"])),
+                    (largest_slice["network_mean"], largest_slice["runtime_mean"]),
+                    xytext=(3, 3),
+                    textcoords="offset points",
+                    fontsize=7,
+                    color=palette[method],
+                )
+            x_min = modality_df["network_mean"].min()
+            x_max = modality_df["network_mean"].max()
+            y_min = modality_df["runtime_mean"].min()
+            y_max = modality_df["runtime_mean"].max()
+            if x_min > 0 and x_max > 0:
+                ax.set_xlim(x_min / 1.6, x_max * 1.6)
+            if y_min > 0 and y_max > 0:
+                ax.set_ylim(y_min / 1.6, y_max * 1.6)
+            ax.set_xscale("log")
+            ax.set_yscale("log")
+            ax.set_title(modality)
+            ax.grid(True, which="both", linewidth=0.3, alpha=0.35)
+            ax.set_xlabel(NETWORK_METRIC_LABELS.get(network_metric, network_metric))
+        axes[0].set_ylabel("Runtime (s)")
+        handles_by_label = {}
+        for ax in axes:
+            handles, labels = ax.get_legend_handles_labels()
+            handles_by_label.update({label: handle for handle, label in zip(handles, labels)})
+        labels = list(handles_by_label)
+        handles = [handles_by_label[label] for label in labels]
+        fig.legend(handles, labels, loc="center left", bbox_to_anchor=(0.91, 0.5), fontsize=8, title="Method")
+        metric_label = NETWORK_METRIC_LABELS.get(network_metric, network_metric)
+        error_bar_sentence = (
+            "Error bars show standard deviation across repeated benchmark runs. " if show_error_bars else ""
+        )
+        caption = (
+            f"Remote slicing {metric_label.lower()} vs. runtime for increasing slice sizes ({preload_caption}). "
+            "Points show average benchmark measurements and connected lines follow increasing slice size within each method. "
+            "Text annotations mark the largest slice size shown for each method. "
+            f"{error_bar_sentence}Panels separate data modalities."
+        )
+        caption = self._add_environment_caption(caption)
+        fig.text(0.02, 0.01, caption, ha="left", va="bottom", fontsize=9, wrap=True, style="italic")
+        fig.tight_layout(rect=[0, 0.12, 0.90, 1.0])
+        fig.savefig(filename, bbox_inches="tight")
+        plt.close(fig)
+
+    def _plot_file_open_network_runtime_scatter(
+        self,
+        runtime_df: pd.DataFrame,
+        network_df: pd.DataFrame,
+        col_name: str,
+        suffix: str = "_pynwb",
+        network_metric: str = "total_transfer_in_bytes",
+        show_error_bars: bool = False,
+    ) -> None:
+        """Plot a network metric against file-open runtime for network-tracking read benchmarks."""
+        filename = self.output_directory / self._filename_with_environment_postfix(
+            f"file_open_{network_metric}_runtime_scatter", suffix
+        )
+        if runtime_df.empty or network_df.empty:
+            self._record_skipped_output("plot", filename.name, "Missing runtime or network file-open data.")
+            return
+
+        default_order = self.pynwb_read_order if suffix == "_pynwb" else self.file_open_order
+        runtime_df = runtime_df[runtime_df[col_name].isin(default_order)]
+        network_df = network_df[network_df[col_name].isin(default_order)]
+        if runtime_df.empty or network_df.empty:
+            output_family = "PyNWB file-open" if suffix == "_pynwb" else "backend file-open"
+            self._record_skipped_output(
+                "plot",
+                filename.name,
+                f"No {output_family} methods available for paired runtime and network measurements.",
+            )
+            return
+
+        group_cols = [col_name, "modality"]
+        runtime_summary = (
+            runtime_df.groupby(group_cols, dropna=False)["value"]
+            .agg(runtime_median="median", runtime_mean="mean", runtime_std="std", runtime_n="count")
+            .reset_index()
+        )
+        network_summary = (
+            network_df[network_df["variable"].eq(network_metric)]
+            .groupby(group_cols, dropna=False)["value"]
+            .agg(network_median="median", network_mean="mean", network_std="std", network_n="count")
+            .reset_index()
+        )
+        plot_df = runtime_summary.merge(network_summary, on=group_cols, how="inner")
+        plot_df = plot_df[(plot_df["runtime_mean"] > 0) & (plot_df["network_mean"] > 0)].copy()
+        if plot_df.empty:
+            self._record_skipped_output(
+                "plot",
+                filename.name,
+                f"No positive paired file-open runtime and {network_metric} measurements.",
+            )
+            return
+
+        if self.summary_tables_directory is not None:
+            plot_df.to_csv(self.summary_tables_directory / f"{filename.stem}_summary.csv", index=False)
+
+        methods = [method for method in default_order if method in set(plot_df[col_name])]
+        palette = dict(zip(methods, sns.color_palette("colorblind", n_colors=len(methods))))
+        modality_order = ["Ecephys", "Ophys", "Icephys"]
+        modality_markers = {"Ecephys": "o", "Ophys": "s", "Icephys": "^"}
+        fig, ax = plt.subplots(figsize=(8, 6))
+        for method in methods:
+            method_df = plot_df[plot_df[col_name].eq(method)].copy()
+            if method_df.empty:
+                continue
+            method_df["modality"] = pd.Categorical(method_df["modality"], categories=modality_order, ordered=True)
+            method_df = method_df.sort_values("modality")
+            ax.plot(
+                method_df["network_mean"],
+                method_df["runtime_mean"],
+                color=palette[method],
+                linewidth=1.2,
+                alpha=0.75,
+            )
+            title = "Remote File Opening"
+            if suffix == "_pynwb":
+                title += " - PyNWB"
+            elif suffix:
+                title += suffix
+            ax.set_title(title)
+            for modality in modality_order:
+                modality_df = method_df[method_df["modality"].eq(modality)]
+                if modality_df.empty:
+                    continue
+                plot_kwargs = {
+                    "marker": modality_markers[modality],
+                    "markersize": 6,
+                    "color": palette[method],
+                    "alpha": 0.9,
+                    "linestyle": "none",
+                }
+                if show_error_bars:
+                    ax.errorbar(
+                        modality_df["network_mean"],
+                        modality_df["runtime_mean"],
+                        xerr=modality_df["network_std"].fillna(0),
+                        yerr=modality_df["runtime_std"].fillna(0),
+                        elinewidth=0.7,
+                        capsize=2,
+                        **plot_kwargs,
+                    )
+                else:
+                    ax.plot(modality_df["network_mean"], modality_df["runtime_mean"], **plot_kwargs)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.grid(True, which="both", linewidth=0.3, alpha=0.35)
+        ax.set_xlabel(NETWORK_METRIC_LABELS.get(network_metric, network_metric))
+        ax.set_ylabel("Runtime (s)")
+        method_handles = [plt.Line2D([], [], color=palette[method], linewidth=1.5) for method in methods]
+        method_labels = [self._display_method_label(method) for method in methods]
+        method_legend = ax.legend(method_handles, method_labels, loc="upper left", fontsize=8, title="Method")
+        modality_handles = [
+            plt.Line2D([], [], color="black", marker=modality_markers[modality], linestyle="none", markersize=6)
+            for modality in modality_order
+        ]
+        modality_legend = ax.legend(modality_handles, modality_order, loc="lower right", fontsize=8, title="Modality")
+        ax.add_artist(method_legend)
+        metric_label = NETWORK_METRIC_LABELS.get(network_metric, network_metric)
+        output_family = "PyNWB file-open" if suffix == "_pynwb" else "backend file-open"
+        error_bar_sentence = (
+            "Error bars show standard deviation across repeated benchmark runs. " if show_error_bars else ""
+        )
+        caption = (
+            f"Network-tracking {output_family} {metric_label.lower()} vs. runtime. "
+            "Points show average benchmark measurements. "
+            "Connected lines link modalities within each method. "
+            f"{error_bar_sentence}Marker shapes distinguish modalities."
+        )
+        caption = self._add_environment_caption(caption)
+        fig.text(0.02, 0.01, caption, ha="left", va="bottom", fontsize=9, wrap=True, style="italic")
+        fig.tight_layout(rect=[0, 0.12, 1.0, 1.0])
+        fig.savefig(filename, bbox_inches="tight")
+        plt.close(fig)
+
     def _plot_network_runtime_heatmap(self, correlations: pd.DataFrame, filename: str) -> None:
         """Plot pooled Spearman correlations as family-specific modality heatmaps."""
         if correlations.empty or "spearman_r" not in correlations.columns:
@@ -1219,6 +1479,16 @@ class BenchmarkVisualizer:
         )
         self.plot_benchmark_dist(**base_kwargs)
 
+        # plot scatterplot of runtime vs network metrics
+        if network_tracking:
+            runtime_df = db.filter_tests("time_remote_file_reading").collect().to_pandas()
+            self._plot_file_open_network_runtime_scatter(
+                runtime_df=runtime_df,
+                network_df=filtered_df.to_pandas(),
+                col_name=col_name,
+                suffix=suffix,
+            )
+
     def plot_slice_benchmarks(
         self,
         db: BenchmarkDatabase,
@@ -1245,6 +1515,7 @@ class BenchmarkVisualizer:
         )
 
         if network_tracking:
+            runtime_df = db.filter_tests("time_remote_slicing").collect().to_pandas()
             summary_group_cols = [
                 "benchmark_name_type",
                 "slice_number",
@@ -1312,6 +1583,14 @@ class BenchmarkVisualizer:
                     }
                 )
                 self.plot_benchmark_dist(**network_kwargs)
+                self._plot_slicing_network_runtime_trajectories(
+                    runtime_df=runtime_df,
+                    network_df=preload_df.to_pandas(),
+                    preload_value=preload_value,
+                    preload_label=preload_label,
+                    preload_caption=preload_caption,
+                    col_name=col_name,
+                )
             return
         else:
             summary_group_cols = ["benchmark_name_type", "slice_number", "is_preloaded", col_name, "modality"]
