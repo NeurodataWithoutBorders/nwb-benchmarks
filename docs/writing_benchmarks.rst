@@ -108,14 +108,6 @@ as well as how long it takes to slice ~20 MB of data from the contents of a remo
             # Note: store as self._temp to avoid tracking garbage collection as well.
             self._temp = self.data_to_slice[slice_range]
 
-.. note::
-
-    The shared parameter sets in ``nwb_benchmarks.benchmarks.params`` store the DANDI API download URLs as literals,
-    so that importing the benchmark suite (which ASV does in every process it starts) does not look every asset up
-    through the DANDI API; only the S3 locations those URLs redirect to are resolved at import. Prefer reusing those
-    parameter sets; ``python -m nwb_benchmarks.scripts.check_dandi_urls`` confirms that the stored URLs still match
-    what the DANDI API resolves to.
-
 
 Notice how the ``read_hdf5_pynwb_remfile_no_cache`` function (which reads an HDF5-backend ``pynwb.NWBFile`` object into memory using the ``remfile`` method) was used as both the main operation being timed in the first case, then reused in the ``setup`` of the second. By following the redirection of the function to its definition, we find it is itself a compound of another helper function for ``remfile`` usage...
 
