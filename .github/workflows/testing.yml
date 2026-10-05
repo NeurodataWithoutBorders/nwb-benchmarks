@@ -59,15 +59,15 @@ jobs:
           conda info
           conda list
 
-      # These runs are a smoke test of the benchmark machinery, not a measurement, so each one is restricted to a
+      # This run is a smoke test of the benchmark machinery, not a measurement, so each benchmark is restricted to a
       # single parameter set. ASV matches the `--bench` pattern against `module.Class.method({parameters})`, which
       # lets the pattern pick one parametrization. Every parameter set opens the full remote NWB file in `setup`,
-      # and the ophys file is by far the fastest of the three test files to open.
-      - name: Run basic file read test
+      # and the ophys file is by far the fastest of the three test files to open. Both benchmarks are selected in
+      # one run, with `|` joining the two patterns, because ASV discovers and imports the suite once per run; the
+      # benchmarks themselves still execute one after another.
+      - name: Run basic file read and slicing tests
         working-directory: nwb_benchmarks
         run: |
-          nwb_benchmarks run --bench "time_remote_file_reading.HDF5PyNWBRemfilePreloadedNoCacheFileReadBenchmark.time_read_hdf5_pynwb_remfile_preloaded_no_cache\(\{'name': 'OphysTestCase'" --debug
-      - name: Run basic slicing test
-        working-directory: nwb_benchmarks
-        run: |
-          nwb_benchmarks run --bench "time_remote_slicing.HDF5PyNWBRemfilePreloadedNoCacheContinuousSliceBenchmark.time_slice\(\{'name': 'OphysTestCase1'" --debug
+          READ="time_remote_file_reading.HDF5PyNWBRemfilePreloadedNoCacheFileReadBenchmark.time_read_hdf5_pynwb_remfile_preloaded_no_cache\(\{'name': 'OphysTestCase'"
+          SLICE="time_remote_slicing.HDF5PyNWBRemfilePreloadedNoCacheContinuousSliceBenchmark.time_slice\(\{'name': 'OphysTestCase1'"
+          nwb_benchmarks run --bench "$READ|$SLICE" --debug
