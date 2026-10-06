@@ -1,3 +1,4 @@
+from nwb_benchmarks import RUN_INCREMENTAL_SLICING_BENCHMARK_MODALITIES
 from nwb_benchmarks.core import get_https_url
 
 ################################### BASE PARAMETERS ###################################
@@ -193,51 +194,77 @@ icephys_slices = [(slice(0, 8192 * i),) for i in range(1, 6)]
 
 #################################### INCREMENTAL SLICE PARAMETERS ###################################
 
+
+def filter_incremental_slice_params_by_modality(params: tuple[dict, ...]) -> tuple[dict, ...]:
+    """Filter incremental slicing benchmark params by RUN_INCREMENTAL_SLICING_BENCHMARKS modality selection."""
+    if RUN_INCREMENTAL_SLICING_BENCHMARK_MODALITIES is None:
+        return params
+
+    return tuple(
+        parameter_set
+        for parameter_set in params
+        if parameter_set.get("modality") in RUN_INCREMENTAL_SLICING_BENCHMARK_MODALITIES
+    )
+
+
 incremental_hdf5_ecephys_params = dict(
     name="EcephysIncrementalSliceTestCase",
+    modality="ecephys",
     object_name="ElectricalSeries",
     slice_template=ecephys_slices[0],
     slice_strategy="iterate_time_axis",
 )
 incremental_hdf5_ophys_params = dict(
     name="OphysIncrementalSliceTestCase",
+    modality="ophys",
     object_name="TwoPhotonSeries",
     slice_template=ophys_slices[0],
     slice_strategy="iterate_time_axis",
 )
 incremental_hdf5_icephys_params = dict(
     name="IcephysIncrementalSliceTestCase",
+    modality="icephys",
     slice_strategy="iterate_icephys_timeseries",
 )
 
-hdf5_redirected_read_incremental_slice_params = (
-    dict(**incremental_hdf5_ecephys_params, https_url=hdf5_ecephys_params["https_url_redirected"]),
-    dict(**incremental_hdf5_ophys_params, https_url=hdf5_ophys_params["https_url_redirected"]),
-    dict(**incremental_hdf5_icephys_params, https_url=hdf5_icephys_params["https_url_redirected"]),
+hdf5_redirected_read_incremental_slice_params = filter_incremental_slice_params_by_modality(
+    (
+        dict(**incremental_hdf5_ecephys_params, https_url=hdf5_ecephys_params["https_url_redirected"]),
+        dict(**incremental_hdf5_ophys_params, https_url=hdf5_ophys_params["https_url_redirected"]),
+        dict(**incremental_hdf5_icephys_params, https_url=hdf5_icephys_params["https_url_redirected"]),
+    )
 )
 
-hdf5_no_redirect_download_incremental_slice_params = (
-    dict(**incremental_hdf5_ecephys_params, https_url=hdf5_ecephys_params["https_url_no_redirect"]),
-    dict(**incremental_hdf5_ophys_params, https_url=hdf5_ophys_params["https_url_no_redirect"]),
-    dict(**incremental_hdf5_icephys_params, https_url=hdf5_icephys_params["https_url_no_redirect"]),
+hdf5_no_redirect_download_incremental_slice_params = filter_incremental_slice_params_by_modality(
+    (
+        dict(**incremental_hdf5_ecephys_params, https_url=hdf5_ecephys_params["https_url_no_redirect"]),
+        dict(**incremental_hdf5_ophys_params, https_url=hdf5_ophys_params["https_url_no_redirect"]),
+        dict(**incremental_hdf5_icephys_params, https_url=hdf5_icephys_params["https_url_no_redirect"]),
+    )
 )
 
-zarr_direct_read_incremental_slice_params = (
-    dict(**incremental_hdf5_ecephys_params, https_url=zarr_ecephys_params["https_url_direct"]),
-    dict(**incremental_hdf5_ophys_params, https_url=zarr_ophys_params["https_url_direct"]),
-    dict(**incremental_hdf5_icephys_params, https_url=zarr_icephys_params["https_url_direct"]),
+zarr_direct_read_incremental_slice_params = filter_incremental_slice_params_by_modality(
+    (
+        dict(**incremental_hdf5_ecephys_params, https_url=zarr_ecephys_params["https_url_direct"]),
+        dict(**incremental_hdf5_ophys_params, https_url=zarr_ophys_params["https_url_direct"]),
+        dict(**incremental_hdf5_icephys_params, https_url=zarr_icephys_params["https_url_direct"]),
+    )
 )
 
-zarr_no_redirect_download_incremental_slice_params = (
-    dict(**incremental_hdf5_ecephys_params, https_url=zarr_ecephys_params["https_url_no_redirect"]),
-    dict(**incremental_hdf5_ophys_params, https_url=zarr_ophys_params["https_url_no_redirect"]),
-    dict(**incremental_hdf5_icephys_params, https_url=zarr_icephys_params["https_url_no_redirect"]),
+zarr_no_redirect_download_incremental_slice_params = filter_incremental_slice_params_by_modality(
+    (
+        dict(**incremental_hdf5_ecephys_params, https_url=zarr_ecephys_params["https_url_no_redirect"]),
+        dict(**incremental_hdf5_ophys_params, https_url=zarr_ophys_params["https_url_no_redirect"]),
+        dict(**incremental_hdf5_icephys_params, https_url=zarr_icephys_params["https_url_no_redirect"]),
+    )
 )
 
-lindi_no_redirect_download_incremental_slice_params = (
-    dict(**incremental_hdf5_ecephys_params, https_url=lindi_ecephys_params["https_url_no_redirect"]),
-    dict(**incremental_hdf5_ophys_params, https_url=lindi_ophys_params["https_url_no_redirect"]),
-    dict(**incremental_hdf5_icephys_params, https_url=lindi_icephys_params["https_url_no_redirect"]),
+lindi_no_redirect_download_incremental_slice_params = filter_incremental_slice_params_by_modality(
+    (
+        dict(**incremental_hdf5_ecephys_params, https_url=lindi_ecephys_params["https_url_no_redirect"]),
+        dict(**incremental_hdf5_ophys_params, https_url=lindi_ophys_params["https_url_no_redirect"]),
+        dict(**incremental_hdf5_icephys_params, https_url=lindi_icephys_params["https_url_no_redirect"]),
+    )
 )
 
 #################################### REMOTE SLICE PARAMETERS ###################################
