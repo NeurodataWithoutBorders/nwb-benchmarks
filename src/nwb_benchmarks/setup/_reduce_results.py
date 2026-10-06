@@ -46,18 +46,22 @@ def _extract_successful_results(test_case: str, raw_results_list: list, result_c
     serialized_params = serialized_params[0]
 
     # Skipped results in JSON are written as `null` and read back into Python as `None`.
-    non_skipped_results = [result for result in raw_results if result is not None]
-    if len(serialized_params) != len(non_skipped_results):
+    if raw_results is None:
+        return {}
+    if not isinstance(raw_results, list):
+        raw_results = [raw_results]
+
+    if len(serialized_params) != len(raw_results):
         message = (
             f"In intermediate results for test case {test_case}: \n"
             f"\tLength mismatch between parameters ({len(serialized_params)}) and "
-            f"result samples ({len(non_skipped_results)})!\n\n"
+            f"result samples ({len(raw_results)})!\n\n"
             "Please raise an issue and share your intermediate results file."
         )
         warnings.warn(message=message)
         return {}
 
-    return {params: raw_result for params, raw_result in zip(serialized_params, non_skipped_results)}
+    return {params: raw_result for params, raw_result in zip(serialized_params, raw_results) if raw_result is not None}
 
 
 def _parse_environment_info(raw_environment_info: List[str]) -> Dict[str, List[Dict[str, str]]]:
