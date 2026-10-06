@@ -3,6 +3,7 @@
 import collections
 import datetime
 import hashlib
+import itertools
 import json
 import pathlib
 import shutil
@@ -13,6 +14,38 @@ from typing import Dict, List
 
 from ..globals import DATABASE_VERSION, ENVIRONMENTS_DIR, MACHINES_DIR, RESULTS_DIR
 from ..utils import get_dictionary_checksum
+
+
+def _serialize_parameter_cases(serialized_params: list) -> list[str]:
+    """Return one serialized parameter-case key per ASV result.
+
+    ASV stores parameters as a list of parameter axes. Preserve the historical
+    single-axis keys used by nwb_benchmarks results, while supporting ASV's
+    general zero-axis and multi-axis parameter layouts.
+    """
+
+    if len(serialized_params) == 0:
+        return ["()"]
+    if len(serialized_params) == 1:
+        return serialized_params[0]
+
+    return [str(parameter_case) for parameter_case in itertools.product(*serialized_params)]
+
+
+def _flatten_parameter_grid(values: list, number_of_parameter_axes: int) -> list:
+    """Flatten ASV result/sample grids to one value per parameter case."""
+
+    if number_of_parameter_axes == 0:
+        return [values]
+    if number_of_parameter_axes == 1:
+        return values
+
+    flattened_values = []
+    for value in values:
+        flattened_values.extend(
+            _flatten_parameter_grid(values=value, number_of_parameter_axes=number_of_parameter_axes - 1)
+        )
+    return flattened_values
 
 
 def _extract_successful_results(test_case: str, raw_results_list: list, result_columns: list[str] | None) -> dict:
@@ -27,7 +60,7 @@ def _extract_successful_results(test_case: str, raw_results_list: list, result_c
 
     # Older ASV layout used by the original reducer implementation.
     if len(raw_results_list) == 12:
-        serialized_params = raw_results_list[1][0]
+        serialized_params = raw_results_list[1]
         raw_results = raw_results_list[11]
     elif result_columns is not None:
         column_index = {column_name: index for index, column_name in enumerate(result_columns)}
@@ -36,20 +69,23 @@ def _extract_successful_results(test_case: str, raw_results_list: list, result_c
 
         serialized_params = raw_results_list[column_index["params"]]
         raw_results = raw_results_list[column_index["result"]]
+        if "samples" in column_index and raw_results_list[column_index["samples"]] is not None:
+            raw_results = raw_results_list[column_index["samples"]]
     else:
         return {}
 
-    # ASV represents one benchmark parameter axis as [[param0, param1, ...]].
-    # The targeted subclasses used for incremental slicing often contain just
-    # one parameter case, e.g. [[param0]].
-    assert len(serialized_params) == 1, "Unexpected length of serialized parameters list!"
-    serialized_params = serialized_params[0]
+    number_of_parameter_axes = len(serialized_params)
+    serialized_params = _serialize_parameter_cases(serialized_params=serialized_params)
 
     # Skipped results in JSON are written as `null` and read back into Python as `None`.
     if raw_results is None:
         return {}
     if not isinstance(raw_results, list):
         raw_results = [raw_results]
+    raw_results = _flatten_parameter_grid(
+        values=raw_results,
+        number_of_parameter_axes=number_of_parameter_axes,
+    )
 
     if len(serialized_params) != len(raw_results):
         message = (
