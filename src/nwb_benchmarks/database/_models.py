@@ -64,6 +64,8 @@ class Results:
 
         # if the parsed string is not a dict (older benchmarks results), convert it to one
         if not isinstance(output, dict):
+            if output == ():
+                return {}
             output = {"https_url": output[0].strip("'")}
 
         return output

@@ -32,28 +32,6 @@ def _serialize_parameter_cases(serialized_params: list) -> list[str]:
     return [str(parameter_case) for parameter_case in itertools.product(*serialized_params)]
 
 
-def _extract_parameter_case_values(values: list, serialized_params: list) -> list:
-    """Return one ASV result/sample value per serialized parameter case.
-
-    ASV stores aggregate results and recorded samples in grids matching the
-    parameter axes. The leaf value may itself be a list of recorded samples, so
-    the grid must be traversed by parameter-axis indices instead of recursively
-    flattening every list.
-    """
-
-    if len(serialized_params) == 0:
-        return [values]
-
-    axis_index_ranges = [range(len(parameter_axis)) for parameter_axis in serialized_params]
-    extracted_values = []
-    for parameter_case_indices in itertools.product(*axis_index_ranges):
-        parameter_case_value = values
-        for index in parameter_case_indices:
-            parameter_case_value = parameter_case_value[index]
-        extracted_values.append(parameter_case_value)
-    return extracted_values
-
-
 def _extract_successful_results(test_case: str, raw_results_list: list, result_columns: list[str] | None) -> dict:
     """Extract successful ASV benchmark results keyed by serialized parameter case.
 
@@ -87,7 +65,6 @@ def _extract_successful_results(test_case: str, raw_results_list: list, result_c
         return {}
     if len(serialized_params) > 0 and not isinstance(raw_results, list):
         raw_results = [raw_results]
-    raw_results = _extract_parameter_case_values(values=raw_results, serialized_params=serialized_params)
     serialized_params = _serialize_parameter_cases(serialized_params=serialized_params)
 
     if len(serialized_params) != len(raw_results):
