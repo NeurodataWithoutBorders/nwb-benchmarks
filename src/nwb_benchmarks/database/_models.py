@@ -36,6 +36,9 @@ class Results:
             """Add additional network metrics."""
             results = benchmark_results.copy()
 
+            if "total_traffic_in_number_of_web_packets" not in results:
+                return results
+
             if results["total_traffic_in_number_of_web_packets"] != 0:
                 results["mean_time_per_web_packet"] = (
                     results["total_transfer_time_in_seconds"] / results["total_traffic_in_number_of_web_packets"]

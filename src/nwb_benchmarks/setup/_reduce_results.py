@@ -32,20 +32,26 @@ def _serialize_parameter_cases(serialized_params: list) -> list[str]:
     return [str(parameter_case) for parameter_case in itertools.product(*serialized_params)]
 
 
-def _flatten_parameter_grid(values: list, number_of_parameter_axes: int) -> list:
-    """Flatten ASV result/sample grids to one value per parameter case."""
+def _extract_parameter_case_values(values: list, serialized_params: list) -> list:
+    """Return one ASV result/sample value per serialized parameter case.
 
-    if number_of_parameter_axes == 0:
+    ASV stores aggregate results and recorded samples in grids matching the
+    parameter axes. The leaf value may itself be a list of recorded samples, so
+    the grid must be traversed by parameter-axis indices instead of recursively
+    flattening every list.
+    """
+
+    if len(serialized_params) == 0:
         return [values]
-    if number_of_parameter_axes == 1:
-        return values
 
-    flattened_values = []
-    for value in values:
-        flattened_values.extend(
-            _flatten_parameter_grid(values=value, number_of_parameter_axes=number_of_parameter_axes - 1)
-        )
-    return flattened_values
+    axis_index_ranges = [range(len(parameter_axis)) for parameter_axis in serialized_params]
+    extracted_values = []
+    for parameter_case_indices in itertools.product(*axis_index_ranges):
+        parameter_case_value = values
+        for index in parameter_case_indices:
+            parameter_case_value = parameter_case_value[index]
+        extracted_values.append(parameter_case_value)
+    return extracted_values
 
 
 def _extract_successful_results(test_case: str, raw_results_list: list, result_columns: list[str] | None) -> dict:
@@ -69,23 +75,20 @@ def _extract_successful_results(test_case: str, raw_results_list: list, result_c
 
         serialized_params = raw_results_list[column_index["params"]]
         raw_results = raw_results_list[column_index["result"]]
-        if "samples" in column_index and raw_results_list[column_index["samples"]] is not None:
-            raw_results = raw_results_list[column_index["samples"]]
+        if "samples" in column_index:
+            samples_index = column_index["samples"]
+            if samples_index < len(raw_results_list) and raw_results_list[samples_index] is not None:
+                raw_results = raw_results_list[samples_index]
     else:
         return {}
-
-    number_of_parameter_axes = len(serialized_params)
-    serialized_params = _serialize_parameter_cases(serialized_params=serialized_params)
 
     # Skipped results in JSON are written as `null` and read back into Python as `None`.
     if raw_results is None:
         return {}
-    if not isinstance(raw_results, list):
+    if len(serialized_params) > 0 and not isinstance(raw_results, list):
         raw_results = [raw_results]
-    raw_results = _flatten_parameter_grid(
-        values=raw_results,
-        number_of_parameter_axes=number_of_parameter_axes,
-    )
+    raw_results = _extract_parameter_case_values(values=raw_results, serialized_params=serialized_params)
+    serialized_params = _serialize_parameter_cases(serialized_params=serialized_params)
 
     if len(serialized_params) != len(raw_results):
         message = (
