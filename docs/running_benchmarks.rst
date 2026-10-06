@@ -52,6 +52,98 @@ Or drop the ``sudo`` if on Windows.
 Many of the current tests can take several minutes to complete; the entire suite will take many times that. Grab some coffee, read a book, or better yet (when the suite becomes larger) just leave it to run overnight.
 
 
+Environment Variables
+---------------------
+
+The benchmark suite uses a few optional environment variables to configure network tracking and to opt in to
+long-running benchmark families that are disabled by default.
+
+``NWB_BENCHMARKS_NETWORK_INTERFACE``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Network tracking benchmarks monitor traffic on a specific network interface. Set ``NWB_BENCHMARKS_NETWORK_INTERFACE``
+to the interface that should be monitored, for example ``en0`` on macOS or ``eth0`` on many Linux systems:
+
+.. code-block::
+
+    export NWB_BENCHMARKS_NETWORK_INTERFACE=en0
+
+On Windows PowerShell, use:
+
+.. code-block::
+
+    $env:NWB_BENCHMARKS_NETWORK_INTERFACE="Ethernet"
+
+If this variable is not set, the package will warn when ``tshark`` is available. Network tracking results may be
+missing or invalid until a suitable interface is configured.
+
+``TSHARK_PATH``
+~~~~~~~~~~~~~~~
+
+Network tracking benchmarks require the ``tshark`` executable. If ``tshark`` is installed on your ``PATH``, no extra
+configuration is needed. Otherwise, set ``TSHARK_PATH`` to the absolute path to the executable:
+
+.. code-block::
+
+    export TSHARK_PATH=/path/to/tshark
+
+On Windows PowerShell, use a path to ``tshark.exe``:
+
+.. code-block::
+
+    $env:TSHARK_PATH="C:\Program Files\Wireshark\tshark.exe"
+
+If ``tshark`` cannot be found, network tracking benchmarks are skipped.
+
+``RUN_DOWNLOAD_BENCHMARKS``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Benchmarks that download entire remote test files are disabled by default because they can take a long time and consume
+substantial bandwidth and disk space. Set ``RUN_DOWNLOAD_BENCHMARKS`` to any non-empty value to include them:
+
+.. code-block::
+
+    export RUN_DOWNLOAD_BENCHMARKS=true
+
+``RUN_INCREMENTAL_SLICING_BENCHMARKS``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Incremental slicing benchmarks are disabled by default because they can be long-running. Set
+``RUN_INCREMENTAL_SLICING_BENCHMARKS`` to opt in. The value can either enable all incremental slicing benchmarks or
+select specific data modalities.
+
+Accepted disabled values are unset, empty, ``false``, ``0``, ``no``, or ``off``.
+
+Accepted values to run all incremental slicing modalities are ``true``, ``1``, ``yes``, ``on``, or ``all``:
+
+.. code-block::
+
+    export RUN_INCREMENTAL_SLICING_BENCHMARKS=true
+
+Accepted modality names are ``ecephys``, ``ophys``, and ``icephys``. To run only one modality:
+
+.. code-block::
+
+    export RUN_INCREMENTAL_SLICING_BENCHMARKS=icephys
+
+To run multiple modalities, provide a comma-separated list:
+
+.. code-block::
+
+    export RUN_INCREMENTAL_SLICING_BENCHMARKS=icephys,ophys
+
+Invalid values raise an error during package import so that misspellings do not accidentally run the wrong set of
+benchmarks.
+
+Example: running only icephys incremental slicing benchmarks
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block::
+
+    export RUN_INCREMENTAL_SLICING_BENCHMARKS=icephys
+    nwb_benchmarks run --bench track_incremental_slicing --debug
+
+
 Additional Flags
 ----------------
 
