@@ -10,6 +10,7 @@ from .command_line_interface import main
 TSHARK_PATH = os.environ.get("TSHARK_PATH", None)
 NETWORK_INTERFACE = os.environ.get("NWB_BENCHMARKS_NETWORK_INTERFACE", None)
 RUN_DOWNLOAD_BENCHMARKS = os.environ.get("RUN_DOWNLOAD_BENCHMARKS", None)
+RUN_INCREMENTAL_SLICING_BENCHMARKS = os.environ.get("RUN_INCREMENTAL_SLICING_BENCHMARKS", None)
 
 if TSHARK_PATH is None:
     TSHARK_PATH = shutil.which("tshark")
@@ -26,9 +27,15 @@ if RUN_DOWNLOAD_BENCHMARKS:
         "RUN_DOWNLOAD_BENCHMARKS is set. Benchmarks that download the entire test file will be run, which may take a long time."
     )
 
+if RUN_INCREMENTAL_SLICING_BENCHMARKS:
+    warnings.warn(
+        "RUN_INCREMENTAL_SLICING_BENCHMARKS is set. Incremental slicing benchmarks will be run, which may take a long time."
+    )
+
 __all__ = [
     "main",
     "TSHARK_PATH",
     "NETWORK_INTERFACE",
     "RUN_DOWNLOAD_BENCHMARKS",
+    "RUN_INCREMENTAL_SLICING_BENCHMARKS",
 ]

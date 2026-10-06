@@ -191,6 +191,57 @@ ophys_slices = [(slice(0, 20 * i), slice(0, 796), slice(0, 512)) for i in range(
 # icephys data has shape (N,) and chunk shape (8192,)
 icephys_slices = [(slice(0, 8192 * i),) for i in range(1, 6)]
 
+#################################### INCREMENTAL SLICE PARAMETERS ###################################
+
+incremental_hdf5_ecephys_params = dict(
+    name="EcephysIncrementalSliceTestCase",
+    object_name="ElectricalSeries",
+    slice_template=ecephys_slices[0],
+    slice_strategy="iterate_time_axis",
+)
+incremental_hdf5_ophys_params = dict(
+    name="OphysIncrementalSliceTestCase",
+    object_name="TwoPhotonSeries",
+    slice_template=ophys_slices[0],
+    slice_strategy="iterate_time_axis",
+)
+incremental_hdf5_icephys_params = dict(
+    name="IcephysIncrementalSliceTestCase",
+    slice_strategy="iterate_icephys_timeseries",
+)
+
+hdf5_redirected_read_incremental_slice_params = (
+    dict(**incremental_hdf5_ecephys_params, https_url=hdf5_ecephys_params["https_url_redirected"]),
+    dict(**incremental_hdf5_ophys_params, https_url=hdf5_ophys_params["https_url_redirected"]),
+    dict(**incremental_hdf5_icephys_params, https_url=hdf5_icephys_params["https_url_redirected"]),
+)
+
+hdf5_no_redirect_download_incremental_slice_params = (
+    dict(**incremental_hdf5_ecephys_params, https_url=hdf5_ecephys_params["https_url_no_redirect"]),
+    dict(**incremental_hdf5_ophys_params, https_url=hdf5_ophys_params["https_url_no_redirect"]),
+    dict(**incremental_hdf5_icephys_params, https_url=hdf5_icephys_params["https_url_no_redirect"]),
+)
+
+zarr_direct_read_incremental_slice_params = (
+    dict(**incremental_hdf5_ecephys_params, https_url=zarr_ecephys_params["https_url_direct"]),
+    dict(**incremental_hdf5_ophys_params, https_url=zarr_ophys_params["https_url_direct"]),
+    dict(**incremental_hdf5_icephys_params, https_url=zarr_icephys_params["https_url_direct"]),
+)
+
+zarr_no_redirect_download_incremental_slice_params = (
+    dict(**incremental_hdf5_ecephys_params, https_url=zarr_ecephys_params["https_url_no_redirect"]),
+    dict(**incremental_hdf5_ophys_params, https_url=zarr_ophys_params["https_url_no_redirect"]),
+    dict(**incremental_hdf5_icephys_params, https_url=zarr_icephys_params["https_url_no_redirect"]),
+)
+
+lindi_no_redirect_download_incremental_slice_params = (
+    dict(**incremental_hdf5_ecephys_params, https_url=lindi_ecephys_params["https_url_no_redirect"]),
+    dict(**incremental_hdf5_ophys_params, https_url=lindi_ophys_params["https_url_no_redirect"]),
+    dict(**incremental_hdf5_icephys_params, https_url=lindi_icephys_params["https_url_no_redirect"]),
+)
+
+#################################### REMOTE SLICE PARAMETERS ###################################
+
 hdf5_redirected_read_slice_params = []
 for index, slice_range in enumerate(ecephys_slices):
     hdf5_redirected_read_slice_params.append(

@@ -15,6 +15,51 @@ from ..globals import DATABASE_VERSION, ENVIRONMENTS_DIR, MACHINES_DIR, RESULTS_
 from ..utils import get_dictionary_checksum
 
 
+def _extract_successful_results(test_case: str, raw_results_list: list, result_columns: list[str] | None) -> dict:
+    """Extract successful ASV benchmark results keyed by serialized parameter case.
+
+    ASV has used multiple result serialization layouts. Older result files store a
+    fixed-length list where parameters are at index 1 and samples are at index 11.
+    Newer result files include a top-level ``result_columns`` list and each result
+    row follows that column order. This helper normalizes both layouts to the
+    reduced results format used by nwb_benchmarks.
+    """
+
+    # Older ASV layout used by the original reducer implementation.
+    if len(raw_results_list) == 12:
+        serialized_params = raw_results_list[1][0]
+        raw_results = raw_results_list[11]
+    elif result_columns is not None:
+        column_index = {column_name: index for index, column_name in enumerate(result_columns)}
+        if "result" not in column_index or "params" not in column_index:
+            return {}
+
+        serialized_params = raw_results_list[column_index["params"]]
+        raw_results = raw_results_list[column_index["result"]]
+    else:
+        return {}
+
+    # ASV represents one benchmark parameter axis as [[param0, param1, ...]].
+    # The targeted subclasses used for incremental slicing often contain just
+    # one parameter case, e.g. [[param0]].
+    assert len(serialized_params) == 1, "Unexpected length of serialized parameters list!"
+    serialized_params = serialized_params[0]
+
+    # Skipped results in JSON are written as `null` and read back into Python as `None`.
+    non_skipped_results = [result for result in raw_results if result is not None]
+    if len(serialized_params) != len(non_skipped_results):
+        message = (
+            f"In intermediate results for test case {test_case}: \n"
+            f"\tLength mismatch between parameters ({len(serialized_params)}) and "
+            f"result samples ({len(non_skipped_results)})!\n\n"
+            "Please raise an issue and share your intermediate results file."
+        )
+        warnings.warn(message=message)
+        return {}
+
+    return {params: raw_result for params, raw_result in zip(serialized_params, non_skipped_results)}
+
+
 def _parse_environment_info(raw_environment_info: List[str]) -> Dict[str, List[Dict[str, str]]]:
     """Turn the results of `conda list` printout to a JSON dictionary."""
     header_stripped = raw_environment_info[3:]
@@ -42,30 +87,15 @@ def reduce_results(machine_id: str, raw_results_file_path: pathlib.Path, raw_env
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
     reduced_results = dict()
+    result_columns = raw_results_info.get("result_columns")
     for test_case, raw_results_list in raw_results_info["results"].items():
-
-        # Only successful runs have a results field of length 12
-        if len(raw_results_list) != 12:
-            continue
-
-        # This code assumes that test cases are only run with one parameter
-        assert len(raw_results_list[1]) == 1, "Unexpected length of serialized parameters list!"
-        serialized_params = raw_results_list[1][0]
-
-        # Skipped results in JSON are writen as `null` and read back into Python as `None`
-        non_skipped_results = [result for result in raw_results_list[11] if result is not None]
-        if len(serialized_params) != len(non_skipped_results):
-            message = (
-                f"In intermediate results for test case {test_case}: \n"
-                f"\tLength mismatch between parameters ({len(serialized_params)}) and "
-                f"result samples ({len(non_skipped_results)})!\n\n"
-                "Please raise an issue and share your intermediate results file."
-            )
-            warnings.warn(message=message)
-        else:
-            reduced_results.update(
-                {test_case: {params: raw_result for params, raw_result in zip(serialized_params, non_skipped_results)}}
-            )
+        extracted_results = _extract_successful_results(
+            test_case=test_case,
+            raw_results_list=raw_results_list,
+            result_columns=result_columns,
+        )
+        if extracted_results:
+            reduced_results.update({test_case: extracted_results})
 
     if len(reduced_results) == 0:
         raise ValueError(

@@ -117,6 +117,8 @@ class Results:
             "parameter_case_https_url": [result.parameter_case.get("https_url") for result in self.results],
             "parameter_case_object_name": [result.parameter_case.get("object_name") for result in self.results],
             "parameter_case_slice_range": [result.parameter_case.get("slice_range") for result in self.results],
+            "parameter_case_slice_template": [result.parameter_case.get("slice_template") for result in self.results],
+            "parameter_case_slice_strategy": [result.parameter_case.get("slice_strategy") for result in self.results],
             "value": [result.value for result in self.results],
             "variable": [result.variable for result in self.results],
         }
