@@ -5,6 +5,7 @@ import datetime
 import hashlib
 import itertools
 import json
+import math
 import pathlib
 import shutil
 import subprocess
@@ -42,42 +43,58 @@ def _extract_successful_results(test_case: str, raw_results_list: list, result_c
     reduced results format used by nwb_benchmarks.
     """
 
-    # Older ASV layout used by the original reducer implementation.
-    if len(raw_results_list) == 12:
-        serialized_params = raw_results_list[1]
-        raw_results = raw_results_list[11]
-    elif result_columns is not None:
+    if raw_results_list is None:
+        return {}
+
+    if result_columns is not None:
         column_index = {column_name: index for index, column_name in enumerate(result_columns)}
         if "result" not in column_index or "params" not in column_index:
             return {}
 
-        serialized_params = raw_results_list[column_index["params"]]
-        raw_results = raw_results_list[column_index["result"]]
+        params_index = column_index["params"]
+        result_index = column_index["result"]
+        if params_index >= len(raw_results_list) or result_index >= len(raw_results_list):
+            return {}
+
+        serialized_params = raw_results_list[params_index]
+        aggregate_results = raw_results_list[result_index]
+        raw_results = aggregate_results
         if "samples" in column_index:
             samples_index = column_index["samples"]
             if samples_index < len(raw_results_list) and raw_results_list[samples_index] is not None:
                 raw_results = raw_results_list[samples_index]
+    # Older ASV layout used by the original reducer implementation.
+    elif len(raw_results_list) == 12:
+        aggregate_results = raw_results_list[0]
+        serialized_params = raw_results_list[1]
+        raw_results = raw_results_list[11]
     else:
         return {}
 
     # Skipped results in JSON are written as `null` and read back into Python as `None`.
-    if raw_results is None:
+    if aggregate_results is None or raw_results is None:
         return {}
-    if len(serialized_params) > 0 and not isinstance(raw_results, list):
+    if not isinstance(aggregate_results, list):
+        aggregate_results = [aggregate_results]
+    if not isinstance(raw_results, list):
         raw_results = [raw_results]
     serialized_params = _serialize_parameter_cases(serialized_params=serialized_params)
 
-    if len(serialized_params) != len(raw_results):
+    if len(serialized_params) != len(aggregate_results) or len(serialized_params) != len(raw_results):
         message = (
             f"In intermediate results for test case {test_case}: \n"
             f"\tLength mismatch between parameters ({len(serialized_params)}) and "
-            f"result samples ({len(raw_results)})!\n\n"
+            f"results ({len(aggregate_results)}) or result samples ({len(raw_results)})!\n\n"
             "Please raise an issue and share your intermediate results file."
         )
         warnings.warn(message=message)
         return {}
 
-    return {params: raw_result for params, raw_result in zip(serialized_params, raw_results) if raw_result is not None}
+    return {
+        params: raw_result
+        for params, aggregate_result, raw_result in zip(serialized_params, aggregate_results, raw_results)
+        if not (isinstance(aggregate_result, float) and math.isnan(aggregate_result)) and raw_result is not None
+    }
 
 
 def _parse_environment_info(raw_environment_info: List[str]) -> Dict[str, List[Dict[str, str]]]:
