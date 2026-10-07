@@ -12,7 +12,7 @@ packages = ["src/nwb_benchmarks"]
 
 [project]
 name = "nwb_benchmarks"
-version="0.1.2"
+version="0.2.0"
 authors = [
   { name="Cody Baker", email="cody.baker@catalystneuro.com" },
 ]
