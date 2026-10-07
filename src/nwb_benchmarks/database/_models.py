@@ -36,6 +36,9 @@ class Results:
             """Add additional network metrics."""
             results = benchmark_results.copy()
 
+            if "total_traffic_in_number_of_web_packets" not in results:
+                return results
+
             if results["total_traffic_in_number_of_web_packets"] != 0:
                 results["mean_time_per_web_packet"] = (
                     results["total_transfer_time_in_seconds"] / results["total_traffic_in_number_of_web_packets"]
@@ -117,6 +120,8 @@ class Results:
             "parameter_case_https_url": [result.parameter_case.get("https_url") for result in self.results],
             "parameter_case_object_name": [result.parameter_case.get("object_name") for result in self.results],
             "parameter_case_slice_range": [result.parameter_case.get("slice_range") for result in self.results],
+            "parameter_case_slice_template": [result.parameter_case.get("slice_template") for result in self.results],
+            "parameter_case_slice_strategy": [result.parameter_case.get("slice_strategy") for result in self.results],
             "value": [result.value for result in self.results],
             "variable": [result.variable for result in self.results],
         }

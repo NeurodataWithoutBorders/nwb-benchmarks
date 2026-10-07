@@ -65,6 +65,14 @@ jobs:
         working-directory: nwb_benchmarks
         run: python -m nwb_benchmarks.scripts.check_dandi_urls
 
+      # `--group` installs a dependency group from `pyproject.toml` and needs pip 25.1 or newer.
+      - name: Run unit tests
+        working-directory: nwb_benchmarks
+        run: |
+          python -m pip install --upgrade "pip>=25.1"
+          python -m pip install --group test
+          python -m pytest tests
+
       # This run is a smoke test of the benchmark machinery, not a measurement, so each benchmark is restricted to a
       # single parameter set. ASV matches the `--bench` pattern against `module.Class.method({parameters})`, which
       # lets the pattern pick one parametrization. Every parameter set opens the full remote NWB file in `setup`,

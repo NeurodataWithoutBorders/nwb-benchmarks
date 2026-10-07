@@ -53,31 +53,28 @@ def reduce_results(machine_id: str, raw_results_file_path: pathlib.Path, raw_env
         assert len(raw_results_list[1]) == 1, "Unexpected length of serialized parameters list!"
         serialized_params = raw_results_list[1][0]
 
-        # ASV records every parameter set of a benchmark, including those a `--bench` pattern did not select.
-        # Those were never run and have a NaN result, so leave them out before pairing parameters with samples.
-        selected = [
-            (params, samples)
-            for params, result, samples in zip(serialized_params, raw_results_list[0], raw_results_list[11])
-            if not (isinstance(result, float) and math.isnan(result))
-        ]
-        if len(selected) == 0:
-            continue
-        selected_params = [params for params, _ in selected]
-
-        # Samples of parameter sets that failed are written as `null` and read back into Python as `None`
-        non_skipped_results = [samples for _, samples in selected if samples is not None]
-        if len(selected_params) != len(non_skipped_results):
+        aggregate_results = raw_results_list[0]
+        samples_per_parameter_set = raw_results_list[11]
+        if not len(serialized_params) == len(aggregate_results) == len(samples_per_parameter_set):
             message = (
                 f"In intermediate results for test case {test_case}: \n"
-                f"\tLength mismatch between parameters ({len(selected_params)}) and "
-                f"result samples ({len(non_skipped_results)})!\n\n"
+                f"\tLength mismatch between parameters ({len(serialized_params)}), results "
+                f"({len(aggregate_results)}) and result samples ({len(samples_per_parameter_set)})!\n\n"
                 "Please raise an issue and share your intermediate results file."
             )
             warnings.warn(message=message)
-        else:
-            reduced_results.update(
-                {test_case: {params: raw_result for params, raw_result in zip(selected_params, non_skipped_results)}}
-            )
+            continue
+
+        # ASV records every parameter set of a benchmark, including those a `--bench` pattern did not select.
+        # Those were never run and have a NaN result. Samples of parameter sets that failed are written as `null`
+        # and read back into Python as `None`. Leave both out, keeping the parameter sets that succeeded.
+        successful_results = {
+            params: samples
+            for params, result, samples in zip(serialized_params, aggregate_results, samples_per_parameter_set)
+            if not (isinstance(result, float) and math.isnan(result)) and samples is not None
+        }
+        if len(successful_results) > 0:
+            reduced_results.update({test_case: successful_results})
 
     if len(reduced_results) == 0:
         raise ValueError(

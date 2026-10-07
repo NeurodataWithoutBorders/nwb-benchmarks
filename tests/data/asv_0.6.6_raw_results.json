@@ -1,0 +1,157 @@
+{
+ "commit_hash": "0123456789abcdef0123456789abcdef01234567",
+ "result_columns": [
+  "result",
+  "params",
+  "version",
+  "started_at",
+  "duration",
+  "stats_ci_99_a",
+  "stats_ci_99_b",
+  "stats_q_25",
+  "stats_q_75",
+  "stats_number",
+  "stats_repeat",
+  "samples",
+  "profile"
+ ],
+ "results": {
+  "bench.Incremental.track_cumulative_slice_times": [
+   [
+    true,
+    null
+   ],
+   [
+    [
+     "{'name': 'A'}",
+     "{'name': 'B'}"
+    ]
+   ],
+   "4933c92c8671f70cbc6f12096f43626d1a35ee18b927d65b2776eb866ab757a7",
+   1791387880190,
+   0.19855,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   [
+    {
+     "cumulative_time_in_seconds": [
+      0.5,
+      1.0,
+      1.5
+     ]
+    },
+    null
+   ]
+  ],
+  "bench.Network.track_network": [
+   [
+    true,
+    true
+   ],
+   [
+    [
+     "{'name': 'A'}",
+     "{'name': 'B'}"
+    ]
+   ],
+   "2001c3f48d2b4c732d8ba1ae5b21815f0e6483e2fb2ed78cc86e3a8658f11bb4",
+   1791387880390,
+   0.20317,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   [
+    {
+     "total_transfer_in_bytes": 100,
+     "total_traffic_in_number_of_web_packets": 4,
+     "total_transfer_time_in_seconds": 2.0
+    },
+    {
+     "total_transfer_in_bytes": 100,
+     "total_traffic_in_number_of_web_packets": 4,
+     "total_transfer_time_in_seconds": 2.0
+    }
+   ]
+  ],
+  "bench.Timed.time_read": [
+   [
+    3.129999996076549e-06,
+    NaN
+   ],
+   [
+    [
+     "{'name': 'A'}",
+     "{'name': 'B'}"
+    ]
+   ],
+   "4ec591f3893044fe1b377f3e1e7ba67e837b75d5522d4151dd4f60b426e8186e",
+   1791387880594,
+   0.097666,
+   [
+    -Infinity,
+    null
+   ],
+   [
+    Infinity,
+    null
+   ],
+   [
+    3.13e-06,
+    null
+   ],
+   [
+    3.13e-06,
+    null
+   ],
+   [
+    1,
+    null
+   ],
+   [
+    1,
+    null
+   ],
+   [
+    [
+     3.129999996076549e-06
+    ],
+    null
+   ]
+  ],
+  "bench.Unwrapped.track_unwrapped": [
+   [
+    {
+     "cumulative_time_in_seconds": [
+      0.5,
+      1.0,
+      1.5
+     ]
+    },
+    {
+     "cumulative_time_in_seconds": [
+      0.5,
+      1.0,
+      1.5
+     ]
+    }
+   ],
+   [
+    [
+     "{'name': 'A'}",
+     "{'name': 'B'}"
+    ]
+   ],
+   "9d2350fd9f55c4dcab83774838a0cac7a82b1928ff1ffee3bafb465713adef23",
+   1791387880693,
+   0.20363
+  ]
+ },
+ "version": 2
+}

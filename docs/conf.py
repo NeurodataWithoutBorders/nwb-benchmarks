@@ -14,6 +14,7 @@ extensions = [
     "sphinx_search.extension",  # Allows for auto search function the documentation
     "sphinx.ext.viewcode",  # Shows source code in the documentation
     "sphinx.ext.extlinks",  # Allows to use shorter external links defined in the extlinks variable.
+    "sphinx_tabs.tabs",  # Groups platform-specific code blocks into synchronized tabs
 ]
 
 templates_path = ["_templates"]

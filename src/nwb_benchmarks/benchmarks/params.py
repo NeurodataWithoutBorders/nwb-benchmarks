@@ -1,3 +1,6 @@
+import os
+import warnings
+
 # The DANDI API download URLs in this module (`https_url_no_redirect`) are literals, resolved once with
 # `nwb_benchmarks.core.get_https_url(..., follow_redirects=False)`, so that importing the benchmark suite, which ASV does
 # in every process it starts, does not look every asset up through the DANDI API. The S3 locations those URLs redirect
@@ -197,6 +200,126 @@ ophys_slices = [(slice(0, 20 * i), slice(0, 796), slice(0, 512)) for i in range(
 
 # icephys data has shape (N,) and chunk shape (8192,)
 icephys_slices = [(slice(0, 8192 * i),) for i in range(1, 6)]
+
+#################################### INCREMENTAL SLICE PARAMETERS ###################################
+
+
+def _parse_incremental_slicing_benchmarks_config(value: str | None) -> tuple[bool, set[str] | None]:
+    """Parse RUN_INCREMENTAL_SLICING_BENCHMARKS into enabled state and selected modalities."""
+    if value is None:
+        return False, None
+
+    normalized_value = value.strip().lower()
+    if normalized_value in {"", "false", "0", "no", "off"}:
+        return False, None
+
+    if normalized_value in {"true", "1", "yes", "on", "all"}:
+        return True, None
+
+    selected_modalities = {modality.strip().lower() for modality in normalized_value.split(",") if modality.strip()}
+    valid_modalities = {"ecephys", "ophys", "icephys"}
+    invalid_modalities = selected_modalities - valid_modalities
+    if invalid_modalities:
+        raise ValueError(
+            f"Invalid RUN_INCREMENTAL_SLICING_BENCHMARKS value {value!r}. "
+            "Expected true, all, ecephys, ophys, icephys, or a comma-separated list of modalities."
+        )
+
+    return True, selected_modalities
+
+
+(
+    RUN_INCREMENTAL_SLICING_BENCHMARKS,
+    RUN_INCREMENTAL_SLICING_BENCHMARK_MODALITIES,
+) = _parse_incremental_slicing_benchmarks_config(os.environ.get("RUN_INCREMENTAL_SLICING_BENCHMARKS", None))
+
+if RUN_INCREMENTAL_SLICING_BENCHMARKS:
+    if RUN_INCREMENTAL_SLICING_BENCHMARK_MODALITIES is None:
+        incremental_slicing_benchmark_description = "all incremental slicing benchmarks"
+    else:
+        incremental_slicing_benchmark_description = (
+            "incremental slicing benchmarks for modalities "
+            f"{', '.join(sorted(RUN_INCREMENTAL_SLICING_BENCHMARK_MODALITIES))}"
+        )
+    warnings.warn(
+        "RUN_INCREMENTAL_SLICING_BENCHMARKS is set. "
+        f"{incremental_slicing_benchmark_description} will be run, which may take a long time."
+    )
+
+
+def filter_incremental_slice_params_by_modality(params: tuple[dict, ...]) -> tuple[dict, ...]:
+    """Filter incremental slicing benchmark params by RUN_INCREMENTAL_SLICING_BENCHMARKS modality selection."""
+    if RUN_INCREMENTAL_SLICING_BENCHMARK_MODALITIES is None:
+        return params
+
+    return tuple(
+        parameter_set
+        for parameter_set in params
+        if parameter_set.get("modality") in RUN_INCREMENTAL_SLICING_BENCHMARK_MODALITIES
+    )
+
+
+incremental_ecephys_params = dict(
+    name="EcephysIncrementalSliceTestCase",
+    modality="ecephys",
+    object_name="ElectricalSeries",
+    slice_template=ecephys_slices[0],
+    slice_strategy="iterate_time_axis",
+)
+incremental_ophys_params = dict(
+    name="OphysIncrementalSliceTestCase",
+    modality="ophys",
+    object_name="TwoPhotonSeries",
+    slice_template=ophys_slices[0],
+    slice_strategy="iterate_time_axis",
+)
+incremental_icephys_params = dict(
+    name="IcephysIncrementalSliceTestCase",
+    modality="icephys",
+    slice_strategy="iterate_icephys_timeseries",
+)
+
+hdf5_redirected_read_incremental_slice_params = filter_incremental_slice_params_by_modality(
+    (
+        dict(**incremental_ecephys_params, https_url=hdf5_ecephys_params["https_url_redirected"]),
+        dict(**incremental_ophys_params, https_url=hdf5_ophys_params["https_url_redirected"]),
+        dict(**incremental_icephys_params, https_url=hdf5_icephys_params["https_url_redirected"]),
+    )
+)
+
+hdf5_no_redirect_download_incremental_slice_params = filter_incremental_slice_params_by_modality(
+    (
+        dict(**incremental_ecephys_params, https_url=hdf5_ecephys_params["https_url_no_redirect"]),
+        dict(**incremental_ophys_params, https_url=hdf5_ophys_params["https_url_no_redirect"]),
+        dict(**incremental_icephys_params, https_url=hdf5_icephys_params["https_url_no_redirect"]),
+    )
+)
+
+zarr_direct_read_incremental_slice_params = filter_incremental_slice_params_by_modality(
+    (
+        dict(**incremental_ecephys_params, https_url=zarr_ecephys_params["https_url_direct"]),
+        dict(**incremental_ophys_params, https_url=zarr_ophys_params["https_url_direct"]),
+        dict(**incremental_icephys_params, https_url=zarr_icephys_params["https_url_direct"]),
+    )
+)
+
+zarr_no_redirect_download_incremental_slice_params = filter_incremental_slice_params_by_modality(
+    (
+        dict(**incremental_ecephys_params, https_url=zarr_ecephys_params["https_url_no_redirect"]),
+        dict(**incremental_ophys_params, https_url=zarr_ophys_params["https_url_no_redirect"]),
+        dict(**incremental_icephys_params, https_url=zarr_icephys_params["https_url_no_redirect"]),
+    )
+)
+
+lindi_no_redirect_download_incremental_slice_params = filter_incremental_slice_params_by_modality(
+    (
+        dict(**incremental_ecephys_params, https_url=lindi_ecephys_params["https_url_no_redirect"]),
+        dict(**incremental_ophys_params, https_url=lindi_ophys_params["https_url_no_redirect"]),
+        dict(**incremental_icephys_params, https_url=lindi_icephys_params["https_url_no_redirect"]),
+    )
+)
+
+#################################### REMOTE SLICE PARAMETERS ###################################
 
 hdf5_redirected_read_slice_params = []
 for index, slice_range in enumerate(ecephys_slices):
