@@ -18,9 +18,10 @@ authors = [
 ]
 description = "Benchmarking for NWB."
 readme = "README.md"
-requires-python = ">=3.10,<3.14"
+requires-python = ">=3.10,<3.15"
 dependencies = [
-    "asv == 0.6.1",
+    "asv==0.6.6",
+    "asv-runner==0.3.1",
     "numba>=0.58.1",  # Pin to specific version for cuda import
     "psutil",
     "dandi",
