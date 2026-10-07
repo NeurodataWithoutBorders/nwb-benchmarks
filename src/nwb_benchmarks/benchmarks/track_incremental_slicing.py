@@ -1,9 +1,9 @@
 """Benchmarks for cumulative open + repeated slice access patterns.
 
 These benchmarks explicitly measure the use case that is extrapolated in the download-vs-streaming plots:
-open a file, read one slice, read the next slice, read the next slice, and so on. Each benchmark returns a dictionary
-of cumulative timings, where ``cumulative_slice_000`` is open time only and ``cumulative_slice_NNN`` includes opening
-the file and reading the first N slices/items.
+open a file, read one slice, read the next slice, read the next slice, and so on. Each benchmark returns
+``{"cumulative_time_in_seconds": [...]}``, a single list of cumulative timings in read order: the first entry is the
+open time only and entry ``N`` includes opening the file and reading the first ``N`` slices/items.
 
 The benchmarks are opt-in and are skipped unless RUN_INCREMENTAL_SLICING_BENCHMARKS is set in the environment.
 """
@@ -98,13 +98,12 @@ class IncrementalSliceBenchmark(BaseBenchmark, ABC):
                     continue
                 yield f"{container_name}/{object_name}", data
 
-    def _track_cumulative_slice_times(self, params: dict[str, Any]) -> dict[str, float]:
+    def _track_cumulative_slice_times(self, params: dict[str, Any]) -> dict[str, list[float]]:
         """Track cumulative open + slice timings for the configured slice strategy."""
-        timings = {}
         start_time = time.perf_counter()
 
         self._open_file(params=params)
-        timings["cumulative_slice_000"] = time.perf_counter() - start_time
+        cumulative_times = [time.perf_counter() - start_time]
 
         slice_strategy = params["slice_strategy"]
         if slice_strategy == "iterate_time_axis":
@@ -112,22 +111,22 @@ class IncrementalSliceBenchmark(BaseBenchmark, ABC):
             self.neurodata_object = get_object_by_name(nwbfile=self.nwbfile, object_name=object_name)
             self.data_to_slice = self.neurodata_object.data
 
-            for slice_index, slice_range in enumerate(
-                self._iter_time_axis_slices(data=self.data_to_slice, slice_template=params["slice_template"]), start=1
+            for slice_range in self._iter_time_axis_slices(
+                data=self.data_to_slice, slice_template=params["slice_template"]
             ):
                 self._temp = self.data_to_slice[slice_range]
-                timings[f"cumulative_slice_{slice_index:03d}"] = time.perf_counter() - start_time
+                cumulative_times.append(time.perf_counter() - start_time)
         elif slice_strategy == "iterate_icephys_timeseries":
-            for slice_index, (_, data) in enumerate(self._iter_icephys_timeseries(nwbfile=self.nwbfile), start=1):
+            for _, data in self._iter_icephys_timeseries(nwbfile=self.nwbfile):
                 self._temp = data[:]
-                timings[f"cumulative_slice_{slice_index:03d}"] = time.perf_counter() - start_time
+                cumulative_times.append(time.perf_counter() - start_time)
         else:
             raise ValueError(f"Unsupported incremental slice strategy: {slice_strategy}")
 
-        return timings
+        return {"cumulative_time_in_seconds": cumulative_times}
 
     @skip_benchmark_if(not RUN_INCREMENTAL_SLICING_BENCHMARKS)
-    def track_cumulative_slice_times(self, params: dict[str, Any]) -> dict[str, float]:
+    def track_cumulative_slice_times(self, params: dict[str, Any]) -> dict[str, list[float]]:
         """Track cumulative open + repeated slice timing."""
         return self._track_cumulative_slice_times(params=params)
 
