@@ -127,9 +127,12 @@ class IncrementalSliceBenchmark(BaseBenchmark, ABC):
         return timings
 
     @skip_benchmark_if(not RUN_INCREMENTAL_SLICING_BENCHMARKS)
-    def track_cumulative_slice_times(self, params: dict[str, Any]) -> dict[str, float]:
+    def track_cumulative_slice_times(self, params: dict[str, Any]) -> dict[str, Any]:
         """Track cumulative open + repeated slice timing."""
-        return self._track_cumulative_slice_times(params=params)
+        # Same structure as `NetworkTracker.asv_network_statistics`: ASV stores 'samples' in the samples column of
+        # the raw results (with `--record-samples`), which is where `reduce_results` reads every benchmark from.
+        # 'number' is simply required, but needs to be None for custom track_ functions.
+        return dict(samples=self._track_cumulative_slice_times(params=params), number=None)
 
 
 class HDF5PyNWBRemfileWithCacheIncrementalSliceBenchmark(IncrementalSliceBenchmark):

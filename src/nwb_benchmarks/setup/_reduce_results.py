@@ -3,7 +3,6 @@
 import collections
 import datetime
 import hashlib
-import itertools
 import json
 import math
 import pathlib
@@ -15,86 +14,6 @@ from typing import Dict, List
 
 from ..globals import DATABASE_VERSION, ENVIRONMENTS_DIR, MACHINES_DIR, RESULTS_DIR
 from ..utils import get_dictionary_checksum
-
-
-def _serialize_parameter_cases(serialized_params: list) -> list[str]:
-    """Return one serialized parameter-case key per ASV result.
-
-    ASV stores parameters as a list of parameter axes. Preserve the historical
-    single-axis keys used by nwb_benchmarks results, while supporting ASV's
-    general zero-axis and multi-axis parameter layouts.
-    """
-
-    if len(serialized_params) == 0:
-        return ["()"]
-    if len(serialized_params) == 1:
-        return serialized_params[0]
-
-    return [str(parameter_case) for parameter_case in itertools.product(*serialized_params)]
-
-
-def _extract_successful_results(test_case: str, raw_results_list: list, result_columns: list[str] | None) -> dict:
-    """Extract successful ASV benchmark results keyed by serialized parameter case.
-
-    ASV has used multiple result serialization layouts. Older result files store a
-    fixed-length list where parameters are at index 1 and samples are at index 11.
-    Newer result files include a top-level ``result_columns`` list and each result
-    row follows that column order. This helper normalizes both layouts to the
-    reduced results format used by nwb_benchmarks.
-    """
-
-    if raw_results_list is None:
-        return {}
-
-    if result_columns is not None:
-        column_index = {column_name: index for index, column_name in enumerate(result_columns)}
-        if "result" not in column_index or "params" not in column_index:
-            return {}
-
-        params_index = column_index["params"]
-        result_index = column_index["result"]
-        if params_index >= len(raw_results_list) or result_index >= len(raw_results_list):
-            return {}
-
-        serialized_params = raw_results_list[params_index]
-        aggregate_results = raw_results_list[result_index]
-        raw_results = aggregate_results
-        if "samples" in column_index:
-            samples_index = column_index["samples"]
-            if samples_index < len(raw_results_list) and raw_results_list[samples_index] is not None:
-                raw_results = raw_results_list[samples_index]
-    # Older ASV layout used by the original reducer implementation.
-    elif len(raw_results_list) == 12:
-        aggregate_results = raw_results_list[0]
-        serialized_params = raw_results_list[1]
-        raw_results = raw_results_list[11]
-    else:
-        return {}
-
-    # Skipped results in JSON are written as `null` and read back into Python as `None`.
-    if aggregate_results is None or raw_results is None:
-        return {}
-    if not isinstance(aggregate_results, list):
-        aggregate_results = [aggregate_results]
-    if not isinstance(raw_results, list):
-        raw_results = [raw_results]
-    serialized_params = _serialize_parameter_cases(serialized_params=serialized_params)
-
-    if len(serialized_params) != len(aggregate_results) or len(serialized_params) != len(raw_results):
-        message = (
-            f"In intermediate results for test case {test_case}: \n"
-            f"\tLength mismatch between parameters ({len(serialized_params)}) and "
-            f"results ({len(aggregate_results)}) or result samples ({len(raw_results)})!\n\n"
-            "Please raise an issue and share your intermediate results file."
-        )
-        warnings.warn(message=message)
-        return {}
-
-    return {
-        params: raw_result
-        for params, aggregate_result, raw_result in zip(serialized_params, aggregate_results, raw_results)
-        if not (isinstance(aggregate_result, float) and math.isnan(aggregate_result)) and raw_result is not None
-    }
 
 
 def _parse_environment_info(raw_environment_info: List[str]) -> Dict[str, List[Dict[str, str]]]:
@@ -124,15 +43,38 @@ def reduce_results(machine_id: str, raw_results_file_path: pathlib.Path, raw_env
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
     reduced_results = dict()
-    result_columns = raw_results_info.get("result_columns")
     for test_case, raw_results_list in raw_results_info["results"].items():
-        extracted_results = _extract_successful_results(
-            test_case=test_case,
-            raw_results_list=raw_results_list,
-            result_columns=result_columns,
-        )
-        if extracted_results:
-            reduced_results.update({test_case: extracted_results})
+
+        # Only successful runs have a results field of length 12
+        if len(raw_results_list) != 12:
+            continue
+
+        # This code assumes that test cases are only run with one parameter
+        assert len(raw_results_list[1]) == 1, "Unexpected length of serialized parameters list!"
+        serialized_params = raw_results_list[1][0]
+
+        aggregate_results = raw_results_list[0]
+        samples_per_parameter_set = raw_results_list[11]
+        if not len(serialized_params) == len(aggregate_results) == len(samples_per_parameter_set):
+            message = (
+                f"In intermediate results for test case {test_case}: \n"
+                f"\tLength mismatch between parameters ({len(serialized_params)}), results "
+                f"({len(aggregate_results)}) and result samples ({len(samples_per_parameter_set)})!\n\n"
+                "Please raise an issue and share your intermediate results file."
+            )
+            warnings.warn(message=message)
+            continue
+
+        # ASV records every parameter set of a benchmark, including those a `--bench` pattern did not select.
+        # Those were never run and have a NaN result. Samples of parameter sets that failed are written as `null`
+        # and read back into Python as `None`. Leave both out, keeping the parameter sets that succeeded.
+        successful_results = {
+            params: samples
+            for params, result, samples in zip(serialized_params, aggregate_results, samples_per_parameter_set)
+            if not (isinstance(result, float) and math.isnan(result)) and samples is not None
+        }
+        if len(successful_results) > 0:
+            reduced_results.update({test_case: successful_results})
 
     if len(reduced_results) == 0:
         raise ValueError(
