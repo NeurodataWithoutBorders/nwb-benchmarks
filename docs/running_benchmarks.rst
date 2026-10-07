@@ -64,15 +64,19 @@ long-running benchmark families that are disabled by default.
 Network tracking benchmarks monitor traffic on a specific network interface. Set ``NWB_BENCHMARKS_NETWORK_INTERFACE``
 to the interface that should be monitored, for example ``en0`` on macOS or ``eth0`` on many Linux systems:
 
-.. code-block::
+.. tabs::
 
-    export NWB_BENCHMARKS_NETWORK_INTERFACE=en0
+    .. group-tab:: macOS / Linux
 
-On Windows PowerShell, use:
+        .. code-block:: bash
 
-.. code-block::
+            export NWB_BENCHMARKS_NETWORK_INTERFACE=en0
 
-    $env:NWB_BENCHMARKS_NETWORK_INTERFACE="Ethernet"
+    .. group-tab:: Windows (PowerShell)
+
+        .. code-block:: powershell
+
+            $env:NWB_BENCHMARKS_NETWORK_INTERFACE="Ethernet"
 
 If this variable is not set, the package will warn when ``tshark`` is available. Network tracking results may be
 missing or invalid until a suitable interface is configured.
@@ -83,15 +87,19 @@ missing or invalid until a suitable interface is configured.
 Network tracking benchmarks require the ``tshark`` executable. If ``tshark`` is installed on your ``PATH``, no extra
 configuration is needed. Otherwise, set ``TSHARK_PATH`` to the absolute path to the executable:
 
-.. code-block::
+.. tabs::
 
-    export TSHARK_PATH=/path/to/tshark
+    .. group-tab:: macOS / Linux
 
-On Windows PowerShell, use a path to ``tshark.exe``:
+        .. code-block:: bash
 
-.. code-block::
+            export TSHARK_PATH=/path/to/tshark
 
-    $env:TSHARK_PATH="C:\Program Files\Wireshark\tshark.exe"
+    .. group-tab:: Windows (PowerShell)
+
+        .. code-block:: powershell
+
+            $env:TSHARK_PATH="C:\Program Files\Wireshark\tshark.exe"
 
 If ``tshark`` cannot be found, network tracking benchmarks are skipped.
 
@@ -101,9 +109,19 @@ If ``tshark`` cannot be found, network tracking benchmarks are skipped.
 Benchmarks that download entire remote test files are disabled by default because they can take a long time and consume
 substantial bandwidth and disk space. Set ``RUN_DOWNLOAD_BENCHMARKS`` to any non-empty value to include them:
 
-.. code-block::
+.. tabs::
 
-    export RUN_DOWNLOAD_BENCHMARKS=true
+    .. group-tab:: macOS / Linux
+
+        .. code-block:: bash
+
+            export RUN_DOWNLOAD_BENCHMARKS=true
+
+    .. group-tab:: Windows (PowerShell)
+
+        .. code-block:: powershell
+
+            $env:RUN_DOWNLOAD_BENCHMARKS="true"
 
 ``RUN_INCREMENTAL_SLICING_BENCHMARKS``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -116,32 +134,73 @@ Accepted disabled values are unset, empty, ``false``, ``0``, ``no``, or ``off``.
 
 Accepted values to run all incremental slicing modalities are ``true``, ``1``, ``yes``, ``on``, or ``all``:
 
-.. code-block::
+.. tabs::
 
-    export RUN_INCREMENTAL_SLICING_BENCHMARKS=true
+    .. group-tab:: macOS / Linux
+
+        .. code-block:: bash
+
+            export RUN_INCREMENTAL_SLICING_BENCHMARKS=true
+
+    .. group-tab:: Windows (PowerShell)
+
+        .. code-block:: powershell
+
+            $env:RUN_INCREMENTAL_SLICING_BENCHMARKS="true"
 
 Accepted modality names are ``ecephys``, ``ophys``, and ``icephys``. To run only one modality:
 
-.. code-block::
+.. tabs::
 
-    export RUN_INCREMENTAL_SLICING_BENCHMARKS=icephys
+    .. group-tab:: macOS / Linux
+
+        .. code-block:: bash
+
+            export RUN_INCREMENTAL_SLICING_BENCHMARKS=icephys
+
+    .. group-tab:: Windows (PowerShell)
+
+        .. code-block:: powershell
+
+            $env:RUN_INCREMENTAL_SLICING_BENCHMARKS="icephys"
 
 To run multiple modalities, provide a comma-separated list:
 
-.. code-block::
+.. tabs::
 
-    export RUN_INCREMENTAL_SLICING_BENCHMARKS=icephys,ophys
+    .. group-tab:: macOS / Linux
+
+        .. code-block:: bash
+
+            export RUN_INCREMENTAL_SLICING_BENCHMARKS=icephys,ophys
+
+    .. group-tab:: Windows (PowerShell)
+
+        .. code-block:: powershell
+
+            $env:RUN_INCREMENTAL_SLICING_BENCHMARKS="icephys,ophys"
 
 Invalid values raise an error during package import so that misspellings do not accidentally run the wrong set of
 benchmarks.
 
 Example: running only icephys incremental slicing benchmarks
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block::
+.. tabs::
 
-    export RUN_INCREMENTAL_SLICING_BENCHMARKS=icephys
-    nwb_benchmarks run --bench track_incremental_slicing --debug
+    .. group-tab:: macOS / Linux
+
+        .. code-block:: bash
+
+            export RUN_INCREMENTAL_SLICING_BENCHMARKS=icephys
+            nwb_benchmarks run --bench track_incremental_slicing --debug
+
+    .. group-tab:: Windows (PowerShell)
+
+        .. code-block:: powershell
+
+            $env:RUN_INCREMENTAL_SLICING_BENCHMARKS="icephys"
+            nwb_benchmarks run --bench track_incremental_slicing --debug
 
 
 Additional Flags
