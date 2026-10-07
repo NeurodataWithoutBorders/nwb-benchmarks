@@ -91,6 +91,16 @@ def test_cumulative_times_for_icephys_strategy():
     np.testing.assert_array_equal(benchmark._temp, np.arange(3))
 
 
+def test_tracked_result_is_wrapped_as_asv_samples():
+    # ASV only writes a `track_` result to the samples column, which `reduce_results` reads, in this structure.
+    benchmark = InMemoryIncrementalSliceBenchmark(nwbfile=make_nwbfile())
+    result = benchmark.track_cumulative_slice_times(params=dict(slice_strategy="iterate_icephys_timeseries"))
+
+    assert list(result) == ["samples", "number"]
+    assert result["number"] is None
+    assert_cumulative_times(result=result["samples"], expected_length=1 + 3)
+
+
 def test_unsupported_strategy_raises():
     benchmark = InMemoryIncrementalSliceBenchmark(nwbfile=make_nwbfile())
 
