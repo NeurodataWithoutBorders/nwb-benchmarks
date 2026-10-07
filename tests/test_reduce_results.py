@@ -7,14 +7,14 @@ import pytest
 from nwb_benchmarks.setup import _reduce_results
 from nwb_benchmarks.setup._reduce_results import reduce_results
 
-# Written by `asv run --record-samples` (as `nwb_benchmarks run` calls it) with asv 0.6.1, trimmed to the keys the
-# reducer reads. It holds one benchmark of each result shape below:
+# Written by `asv run --record-samples` (as `nwb_benchmarks run` calls it) with asv 0.6.6 and asv-runner 0.3.1, the
+# versions the environment pins, trimmed to the keys the reducer reads. It holds one benchmark of each result shape:
 #   - `Incremental`: a `track_` benchmark returning `dict(samples=..., number=None)` with a list of cumulative times, as
 #     `track_incremental_slicing` does. Parameter set B raised, so its samples are `null`.
 #   - `Network`: a `track_` benchmark returning `dict(samples=..., number=None)`, as the network tracking benchmarks do.
 #   - `Timed`: a `time_` benchmark run with a `--bench` pattern selecting only parameter set A, so B's result is NaN.
 #   - `Unwrapped`: a `track_` benchmark returning a plain dict, which ASV stores in the `result` column without samples.
-RAW_RESULTS_FILE_PATH = pathlib.Path(__file__).parent / "data" / "asv_0.6.1_raw_results.json"
+RAW_RESULTS_FILE_PATH = pathlib.Path(__file__).parent / "data" / "asv_0.6.6_raw_results.json"
 
 INCREMENTAL = "bench.Incremental.track_cumulative_slice_times"
 NETWORK = "bench.Network.track_network"
