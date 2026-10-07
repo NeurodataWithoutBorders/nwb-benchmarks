@@ -1,6 +1,8 @@
 import pytest
 
-from nwb_benchmarks import _parse_incremental_slicing_benchmarks_config
+from nwb_benchmarks.benchmarks.params import (
+    _parse_incremental_slicing_benchmarks_config,
+)
 
 
 @pytest.mark.parametrize("value", [None, "", "  ", "false", "0", "no", "OFF"])

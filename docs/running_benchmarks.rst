@@ -180,8 +180,8 @@ To run multiple modalities, provide a comma-separated list:
 
             $env:RUN_INCREMENTAL_SLICING_BENCHMARKS="icephys,ophys"
 
-Invalid values raise an error during package import so that misspellings do not accidentally run the wrong set of
-benchmarks.
+Invalid values raise an error when the benchmark suite is imported so that misspellings do not accidentally run the
+wrong set of benchmarks.
 
 Example: running only icephys incremental slicing benchmarks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

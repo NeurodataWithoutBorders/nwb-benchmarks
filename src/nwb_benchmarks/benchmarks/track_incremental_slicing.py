@@ -17,7 +17,6 @@ from typing import Any, Tuple
 from asv_runner.benchmarks.mark import SkipNotImplemented, skip_benchmark_if
 from pynwb import NWBHDF5IO
 
-from nwb_benchmarks import RUN_INCREMENTAL_SLICING_BENCHMARKS
 from nwb_benchmarks.core import (
     BaseBenchmark,
     download_asset_if_not_exists,
@@ -33,6 +32,7 @@ from nwb_benchmarks.core import (
 from nwb_benchmarks.setup import get_persistent_download_directory
 
 from .params import (
+    RUN_INCREMENTAL_SLICING_BENCHMARKS,
     hdf5_no_redirect_download_incremental_slice_params,
     hdf5_redirected_read_incremental_slice_params,
     lindi_no_redirect_download_incremental_slice_params,

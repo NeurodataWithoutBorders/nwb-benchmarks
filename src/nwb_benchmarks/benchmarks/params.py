@@ -1,4 +1,5 @@
-from nwb_benchmarks import RUN_INCREMENTAL_SLICING_BENCHMARK_MODALITIES
+import os
+import warnings
 
 # The DANDI API download URLs in this module (`https_url_no_redirect`) are literals, resolved once with
 # `nwb_benchmarks.core.get_https_url(..., follow_redirects=False)`, so that importing the benchmark suite, which ASV does
@@ -201,6 +202,49 @@ ophys_slices = [(slice(0, 20 * i), slice(0, 796), slice(0, 512)) for i in range(
 icephys_slices = [(slice(0, 8192 * i),) for i in range(1, 6)]
 
 #################################### INCREMENTAL SLICE PARAMETERS ###################################
+
+
+def _parse_incremental_slicing_benchmarks_config(value: str | None) -> tuple[bool, set[str] | None]:
+    """Parse RUN_INCREMENTAL_SLICING_BENCHMARKS into enabled state and selected modalities."""
+    if value is None:
+        return False, None
+
+    normalized_value = value.strip().lower()
+    if normalized_value in {"", "false", "0", "no", "off"}:
+        return False, None
+
+    if normalized_value in {"true", "1", "yes", "on", "all"}:
+        return True, None
+
+    selected_modalities = {modality.strip().lower() for modality in normalized_value.split(",") if modality.strip()}
+    valid_modalities = {"ecephys", "ophys", "icephys"}
+    invalid_modalities = selected_modalities - valid_modalities
+    if invalid_modalities:
+        raise ValueError(
+            f"Invalid RUN_INCREMENTAL_SLICING_BENCHMARKS value {value!r}. "
+            "Expected true, all, ecephys, ophys, icephys, or a comma-separated list of modalities."
+        )
+
+    return True, selected_modalities
+
+
+(
+    RUN_INCREMENTAL_SLICING_BENCHMARKS,
+    RUN_INCREMENTAL_SLICING_BENCHMARK_MODALITIES,
+) = _parse_incremental_slicing_benchmarks_config(os.environ.get("RUN_INCREMENTAL_SLICING_BENCHMARKS", None))
+
+if RUN_INCREMENTAL_SLICING_BENCHMARKS:
+    if RUN_INCREMENTAL_SLICING_BENCHMARK_MODALITIES is None:
+        incremental_slicing_benchmark_description = "all incremental slicing benchmarks"
+    else:
+        incremental_slicing_benchmark_description = (
+            "incremental slicing benchmarks for modalities "
+            f"{', '.join(sorted(RUN_INCREMENTAL_SLICING_BENCHMARK_MODALITIES))}"
+        )
+    warnings.warn(
+        "RUN_INCREMENTAL_SLICING_BENCHMARKS is set. "
+        f"{incremental_slicing_benchmark_description} will be run, which may take a long time."
+    )
 
 
 def filter_incremental_slice_params_by_modality(params: tuple[dict, ...]) -> tuple[dict, ...]:
