@@ -58,10 +58,12 @@ nwb_benchmarks = "nwb_benchmarks.command_line_interface:main"
 database = ["polars"]
 dev = ["ipython", "pre-commit"]
 figures = ["seaborn", "matplotlib", "pyarrow"]
+test = ["pytest", {include-group = "database"}, {include-group = "figures"}]
 all = [
     {include-group = "database"},
     {include-group = "dev"},
-    {include-group = "figures"}
+    {include-group = "figures"},
+    {include-group = "test"}
 ]
 
 

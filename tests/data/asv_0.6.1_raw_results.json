@@ -1,0 +1,120 @@
+{
+ "commit_hash": "0123456789abcdef0123456789abcdef01234567",
+ "result_columns": [
+  "result",
+  "params",
+  "version",
+  "started_at",
+  "duration",
+  "stats_ci_99_a",
+  "stats_ci_99_b",
+  "stats_q_25",
+  "stats_q_75",
+  "stats_number",
+  "stats_repeat",
+  "samples",
+  "profile"
+ ],
+ "results": {
+  "bench.Incremental.track_cumulative_slice_times": [
+   [
+    {
+     "cumulative_time_in_seconds": [
+      0.5,
+      1.0,
+      1.5
+     ]
+    },
+    null
+   ],
+   [
+    [
+     "{'name': 'A'}",
+     "{'name': 'B'}"
+    ]
+   ],
+   "b3e7fa9dfc40a9240d5f4dc9d6e3e552a4fbbe90b8b7e12ee43c6aff1c810eef",
+   1791349309228,
+   0.023083
+  ],
+  "bench.Network.track_network": [
+   [
+    true,
+    true
+   ],
+   [
+    [
+     "{'name': 'A'}",
+     "{'name': 'B'}"
+    ]
+   ],
+   "26e3a7e66482e998b12768ed82102e95f8770e4e2f3737de978309feb7d94f69",
+   1791349309252,
+   0.012449,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   [
+    {
+     "total_transfer_in_bytes": 100,
+     "total_traffic_in_number_of_web_packets": 4,
+     "total_transfer_time_in_seconds": 2.0
+    },
+    {
+     "total_transfer_in_bytes": 100,
+     "total_traffic_in_number_of_web_packets": 4,
+     "total_transfer_time_in_seconds": 2.0
+    }
+   ]
+  ],
+  "bench.Timed.time_read": [
+   [
+    1.2534999996205443e-05,
+    NaN
+   ],
+   [
+    [
+     "{'name': 'A'}",
+     "{'name': 'B'}"
+    ]
+   ],
+   "267b65a446ea0bd2b4564e2747f943211b97455e145f7675e0abcc11247da3ad",
+   1791349309265,
+   0.006144,
+   [
+    -Infinity,
+    null
+   ],
+   [
+    Infinity,
+    null
+   ],
+   [
+    1.2535e-05,
+    null
+   ],
+   [
+    1.2535e-05,
+    null
+   ],
+   [
+    1,
+    null
+   ],
+   [
+    1,
+    null
+   ],
+   [
+    [
+     1.2534999996205443e-05
+    ],
+    null
+   ]
+  ]
+ },
+ "version": 2
+}
