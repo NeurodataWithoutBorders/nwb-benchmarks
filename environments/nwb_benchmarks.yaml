@@ -1,12 +1,13 @@
 name: nwb_benchmarks
 dependencies:
-  - python = 3.11.7
-  - git = 2.40.1
+  - python=3.14.8
+  - git=2.56.0
   - conda-forge::h5py>=3.2
   - pip
   - pip:
       - setuptools
-      - asv == 0.6.1
+      - asv==0.6.6
+      - asv-runner==0.3.1
       - numba>=0.58.1  # Pin to specific version for cuda import
       - psutil
       - dandi
@@ -18,5 +19,5 @@ dependencies:
       - lindi>=0.3.6
       - pynwb>=2.8.2
       - hdmf>=3.14.5
-      - hdmf-zarr
+      - hdmf-zarr==0.13.0
       - -e ..

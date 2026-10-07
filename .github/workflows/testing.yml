@@ -28,21 +28,52 @@ jobs:
           BRANCH="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
           git checkout $BRANCH
 
-      - name: Install special conda environment
+      - name: Install conda
         uses: conda-incubator/setup-miniconda@v2
         with:
           activate-environment: nwb_benchmarks
-          environment-file: nwb_benchmarks/environments/nwb_benchmarks.yaml
           auto-activate-base: false
+
+      # `$CONDA` is set by the runner image, but `${{ env.* }}` expressions only see variables written to GITHUB_ENV
+      - name: Collect the conda environment cache key inputs
+        id: cache-inputs
+        run: |
+          echo "week=$(date -u '+%G-W%V')" >> "$GITHUB_OUTPUT"
+          echo "CONDA=$CONDA" >> "$GITHUB_ENV"
+
+      # Reuse the environment built by an earlier run with the same dependency files. The pip dependencies are
+      # unpinned, so the key also includes the ISO week to pick up new upstream releases at least weekly.
+      - name: Restore cached conda environment
+        id: env-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CONDA }}/envs/nwb_benchmarks
+          key: conda-env-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-inputs.outputs.week }}-${{ hashFiles('nwb_benchmarks/environments/nwb_benchmarks.yaml', 'nwb_benchmarks/pyproject.toml') }}
+
+      - name: Install special conda environment
+        if: steps.env-cache.outputs.cache-hit != 'true'
+        run: conda env update --name nwb_benchmarks --file nwb_benchmarks/environments/nwb_benchmarks.yaml
 
       - name: Display installed packages and their sources for debugging
         run: |
           conda info
           conda list
 
-      - name: Run basic file read test
+      # `params.py` hardcodes the DANDI API download URLs so that importing the benchmark suite does not look every asset
+      # up. Check they still match what the API resolves to, so a replaced asset shows up here instead of in a benchmark.
+      - name: Check the hardcoded DANDI URLs are current
         working-directory: nwb_benchmarks
-        run: nwb_benchmarks run --bench time_remote_file_reading.HDF5PyNWBRemfilePreloadedNoCacheFileReadBenchmark.time_read_hdf5_pynwb_remfile_preloaded_no_cache --debug
-      - name: Run basic slicing test
+        run: python -m nwb_benchmarks.scripts.check_dandi_urls
+
+      # This run is a smoke test of the benchmark machinery, not a measurement, so each benchmark is restricted to a
+      # single parameter set. ASV matches the `--bench` pattern against `module.Class.method({parameters})`, which
+      # lets the pattern pick one parametrization. Every parameter set opens the full remote NWB file in `setup`,
+      # and the ophys file is by far the fastest of the three test files to open. Both benchmarks are selected in
+      # one run, with `|` joining the two patterns, because ASV discovers and imports the suite once per run; the
+      # benchmarks themselves still execute one after another.
+      - name: Run basic file read and slicing tests
         working-directory: nwb_benchmarks
-        run: nwb_benchmarks run --bench time_remote_slicing.HDF5PyNWBRemfilePreloadedNoCacheContinuousSliceBenchmark.time_slice --debug
+        run: |
+          READ="time_remote_file_reading.HDF5PyNWBRemfilePreloadedNoCacheFileReadBenchmark.time_read_hdf5_pynwb_remfile_preloaded_no_cache\(\{'name': 'OphysTestCase'"
+          SLICE="time_remote_slicing.HDF5PyNWBRemfilePreloadedNoCacheContinuousSliceBenchmark.time_slice\(\{'name': 'OphysTestCase1'"
+          nwb_benchmarks run --bench "$READ|$SLICE" --debug
