@@ -44,9 +44,6 @@ from .params import (
 class IncrementalSliceBenchmark(BaseBenchmark, ABC):
     """Base class for cumulative open + repeated slice benchmarks."""
 
-    # Ensure a full incremental sequence is only performed once per ASV measurement.
-    number = 1
-
     # Some full-axis incremental reads may be long-running.
     timeout = 60 * 60 * 12
 
