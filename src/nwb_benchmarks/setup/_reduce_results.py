@@ -31,6 +31,28 @@ def _parse_environment_info(raw_environment_info: List[str]) -> Dict[str, List[D
     return parsed_environment
 
 
+def _validate_environment_info(parsed_environment_info: Dict[str, List[Dict[str, str]]], source: pathlib.Path) -> None:
+    """Raise if the recorded environment does not list `pynwb`, i.e., it is not the environment running the benchmarks."""
+    recorded_package_names = {package.get("name") for package in parsed_environment_info[sys.version]}
+    if "pynwb" not in recorded_package_names:
+        message = (
+            f"The recorded environment info at {source} does not list 'pynwb', so it likely describes a different "
+            f"conda environment than the one running the benchmarks ({sys.prefix}). Please activate the environment "
+            "the benchmarks are installed in and try again."
+        )
+        raise ValueError(message)
+
+
+def validate_environment_info_file(raw_environment_info_file_path: pathlib.Path) -> None:
+    """Raise if the `conda list` output saved at the given path does not describe the benchmarks environment."""
+    with open(file=raw_environment_info_file_path, mode="r") as io:
+        raw_environment_info = io.readlines()
+    _validate_environment_info(
+        parsed_environment_info=_parse_environment_info(raw_environment_info=raw_environment_info),
+        source=raw_environment_info_file_path,
+    )
+
+
 def reduce_results(machine_id: str, raw_results_file_path: pathlib.Path, raw_environment_info_file_path: pathlib.Path):
     """Default ASV result file is very inefficient - this routine simplifies it for sharing."""
     with open(file=raw_results_file_path, mode="r") as io:
@@ -39,6 +61,8 @@ def reduce_results(machine_id: str, raw_results_file_path: pathlib.Path, raw_env
         raw_environment_info = io.readlines()
     parsed_environment_info = _parse_environment_info(raw_environment_info=raw_environment_info)
     environment_id = get_dictionary_checksum(dictionary=parsed_environment_info)
+
+    _validate_environment_info(parsed_environment_info=parsed_environment_info, source=raw_environment_info_file_path)
 
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
