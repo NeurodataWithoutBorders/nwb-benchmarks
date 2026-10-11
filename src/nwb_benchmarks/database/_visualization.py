@@ -47,12 +47,30 @@ DEFAULT_METHOD_COLORS = {
     "zarr s3": "#F0E442",
     "zarr s3 force no consolidated": "#8C510A",
 }
-DEFAULT_METHOD_COLORS.update(
-    {
-        method.replace("h5py", "pynwb").replace("zarr", "zarr pynwb"): color
-        for method, color in list(DEFAULT_METHOD_COLORS.items())
-    }
-)
+
+# Variants of the same method are told apart by line style and marker in addition to color.
+# Dash-dot is used rather than dashed so the variant does not collide with the dashed throughput guide lines.
+DEFAULT_METHOD_LINESTYLES = {
+    "zarr s3 force no consolidated": "-.",
+}
+DEFAULT_METHOD_MARKERS = {
+    "zarr s3 force no consolidated": "s",
+}
+
+
+def _add_pynwb_method_variants(mapping: Dict[str, Any]) -> None:
+    """Extend a per-method mapping in place with the equivalent PyNWB method names."""
+    mapping.update(
+        {
+            method.replace("h5py", "pynwb").replace("zarr", "zarr pynwb"): value
+            for method, value in list(mapping.items())
+        }
+    )
+
+
+_add_pynwb_method_variants(DEFAULT_METHOD_COLORS)
+_add_pynwb_method_variants(DEFAULT_METHOD_LINESTYLES)
+_add_pynwb_method_variants(DEFAULT_METHOD_MARKERS)
 
 NETWORK_METRIC_LABELS = {
     "amount_downloaded_in_bytes": "Downloaded bytes",
@@ -274,6 +292,26 @@ class BenchmarkVisualizer:
                 else fallback_colors[zlib.crc32(method.encode("utf-8")) % len(fallback_colors)]
             )
         return palette
+
+    @staticmethod
+    def _method_linestyle(method: str) -> str:
+        """Return the line style used for a benchmark method (solid unless the method is a variant)."""
+        return DEFAULT_METHOD_LINESTYLES.get(method, "-")
+
+    @staticmethod
+    def _method_marker(method: str) -> str:
+        """Return the marker used for a benchmark method (circle unless the method is a variant)."""
+        return DEFAULT_METHOD_MARKERS.get(method, "o")
+
+    @classmethod
+    def _method_style_kwargs(cls, order: Optional[List[str]]) -> Dict[str, List[str]]:
+        """Return per-hue ``markers`` and ``linestyles`` for seaborn point plots grouped by benchmark method."""
+        if order is None:
+            return {}
+        return {
+            "markers": [cls._method_marker(method) for method in order],
+            "linestyles": [cls._method_linestyle(method) for method in order],
+        }
 
     @classmethod
     def _resolve_palette(cls, df, group: str, order: List[str], palette: Any) -> Any:
@@ -984,8 +1022,9 @@ class BenchmarkVisualizer:
                     continue
                 label = self._display_method_label(method)
                 plot_kwargs = {
-                    "marker": "o",
+                    "marker": self._method_marker(method),
                     "markersize": 4,
+                    "linestyle": self._method_linestyle(method),
                     "linewidth": 1.2,
                     "color": palette[method],
                     "alpha": 0.85,
@@ -1126,6 +1165,7 @@ class BenchmarkVisualizer:
                 method_df["network_mean"],
                 method_df["runtime_mean"],
                 color=palette[method],
+                linestyle=self._method_linestyle(method),
                 linewidth=1.2,
                 alpha=0.75,
             )
@@ -1166,7 +1206,10 @@ class BenchmarkVisualizer:
         ax.grid(True, which="both", linewidth=0.3, alpha=0.35)
         ax.set_xlabel(NETWORK_METRIC_LABELS.get(network_metric, network_metric))
         ax.set_ylabel("Runtime (s)")
-        method_handles = [plt.Line2D([], [], color=palette[method], linewidth=1.5) for method in methods]
+        method_handles = [
+            plt.Line2D([], [], color=palette[method], linestyle=self._method_linestyle(method), linewidth=1.5)
+            for method in methods
+        ]
         method_labels = [self._display_method_label(method) for method in methods]
         method_legend = ax.legend(method_handles, method_labels, loc="upper left", fontsize=8, title="Method")
         modality_handles = [
@@ -1488,6 +1531,7 @@ class BenchmarkVisualizer:
             return
 
         palette = self._resolve_palette(df=df, group=group, order=metric_order, palette="Paired")
+        style_kwargs = self._method_style_kwargs(metric_order)
 
         g = sns.catplot(
             data=df,
@@ -1501,6 +1545,7 @@ class BenchmarkVisualizer:
             palette=palette,
             sharey=False,
             kind="point",
+            **style_kwargs,
         )
 
         if caption is not None:
@@ -1787,7 +1832,7 @@ class BenchmarkVisualizer:
             x_range,
             y_remote,
             color=color,
-            linestyle="solid",
+            linestyle=self._method_linestyle(benchmark_name),
             linewidth=2,
             label=self._display_method_label(benchmark_name),
         )
@@ -2218,6 +2263,7 @@ class BenchmarkVisualizer:
             palette=palette,
             sharey=False,
             kind="point",
+            **self._method_style_kwargs(method_order),
         )
         if g._legend is not None:
             display_labels = dict(zip(method_order, self._display_method_labels(method_order)))
