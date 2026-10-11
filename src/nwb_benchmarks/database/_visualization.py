@@ -1,6 +1,7 @@
 import shutil
 import textwrap
 import warnings
+import zlib
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -34,6 +35,43 @@ DEFAULT_BENCHMARK_LABELS = OrderedDict(
 )
 DEFAULT_BENCHMARK_ORDER = list(DEFAULT_BENCHMARK_LABELS.keys())
 
+DEFAULT_METHOD_COLORS = {
+    "hdf5 h5py remfile no cache": "#0072B2",
+    "hdf5 h5py remfile with cache": "#56B4E9",
+    "hdf5 h5py fsspec https no cache": "#009E73",
+    "hdf5 h5py fsspec https with cache": "#CC79A7",
+    "hdf5 h5py fsspec s3 no cache": "#D55E00",
+    "hdf5 h5py fsspec s3 with cache": "#E69F00",
+    "hdf5 h5py ros3": "#000000",
+    "lindi h5py": "#999999",
+    "zarr s3": "#F0E442",
+    "zarr s3 force no consolidated": "#8C510A",
+}
+
+# Variants of the same method are told apart by line style and marker in addition to color.
+# Dash-dot is used rather than dashed so the variant does not collide with the dashed throughput guide lines.
+DEFAULT_METHOD_LINESTYLES = {
+    "zarr s3 force no consolidated": "-.",
+}
+DEFAULT_METHOD_MARKERS = {
+    "zarr s3 force no consolidated": "s",
+}
+
+
+def _add_pynwb_method_variants(mapping: Dict[str, Any]) -> None:
+    """Extend a per-method mapping in place with the equivalent PyNWB method names."""
+    mapping.update(
+        {
+            method.replace("h5py", "pynwb").replace("zarr", "zarr pynwb"): value
+            for method, value in list(mapping.items())
+        }
+    )
+
+
+_add_pynwb_method_variants(DEFAULT_METHOD_COLORS)
+_add_pynwb_method_variants(DEFAULT_METHOD_LINESTYLES)
+_add_pynwb_method_variants(DEFAULT_METHOD_MARKERS)
+
 NETWORK_METRIC_LABELS = {
     "amount_downloaded_in_bytes": "Downloaded bytes",
     "amount_downloaded_in_number_of_packets": "Downloaded packets",
@@ -46,6 +84,8 @@ NETWORK_METRIC_LABELS = {
     "total_transfer_in_number_of_packets": "Total transfer packets",
     "total_transfer_time_in_seconds": "Total transfer time (s)",
 }
+
+BYTE_NETWORK_METRICS = {metric for metric in NETWORK_METRIC_LABELS if metric.endswith("_in_bytes")}
 
 
 class BenchmarkVisualizer:
@@ -239,6 +279,87 @@ class BenchmarkVisualizer:
         """Return display label for one backend or PyNWB benchmark method name."""
         label = BenchmarkVisualizer._display_method_labels([method])[0]
         return label
+
+    @staticmethod
+    def _method_palette(methods: List[str]) -> Dict[str, Any]:
+        """Return a stable method-to-color mapping for the requested benchmark methods."""
+        fallback_colors = sns.color_palette("husl", n_colors=256)
+        palette = {}
+        for method in methods:
+            palette[method] = (
+                DEFAULT_METHOD_COLORS[method]
+                if method in DEFAULT_METHOD_COLORS
+                else fallback_colors[zlib.crc32(method.encode("utf-8")) % len(fallback_colors)]
+            )
+        return palette
+
+    @staticmethod
+    def _method_linestyle(method: str) -> str:
+        """Return the line style used for a benchmark method (solid unless the method is a variant)."""
+        return DEFAULT_METHOD_LINESTYLES.get(method, "-")
+
+    @staticmethod
+    def _method_marker(method: str) -> str:
+        """Return the marker used for a benchmark method (circle unless the method is a variant)."""
+        return DEFAULT_METHOD_MARKERS.get(method, "o")
+
+    @classmethod
+    def _method_style_kwargs(cls, order: Optional[List[str]]) -> Dict[str, List[str]]:
+        """Return per-hue ``markers`` and ``linestyles`` for seaborn point plots grouped by benchmark method."""
+        if order is None:
+            return {}
+        return {
+            "markers": [cls._method_marker(method) for method in order],
+            "linestyles": [cls._method_linestyle(method) for method in order],
+        }
+
+    @classmethod
+    def _resolve_palette(cls, df, group: str, order: List[str], palette: Any) -> Any:
+        """Use stable method colors when a categorical plot groups by benchmark method names."""
+        if order is None:
+            return palette
+        if group in df and any(method in DEFAULT_METHOD_COLORS for method in order):
+            return cls._method_palette(order)
+        return palette
+
+    @staticmethod
+    def _add_throughput_lines(ax, rates_mb_s=(0.1, 1, 10, 100)) -> None:
+        """Draw lines of constant throughput (runtime = bytes / rate) on a log-log axis."""
+        xmin, xmax = ax.get_xlim()
+        ymin, ymax = ax.get_ylim()
+        if xmin <= 0 or xmax <= 0 or ymin <= 0 or ymax <= 0:
+            return
+        x = np.logspace(np.log10(xmin), np.log10(xmax), 200)
+        for rate in rates_mb_s:
+            y = x / (rate * 1e6)
+            ax.plot(x, y, color="0.75", lw=0.8, ls="--", zorder=0)
+            y_at_xmax = xmax / (rate * 1e6)
+            if ymin <= y_at_xmax <= ymax:
+                ax.text(
+                    xmax,
+                    y_at_xmax,
+                    f" {rate:g} MB/s",
+                    color="0.5",
+                    fontsize=7,
+                    va="center",
+                    ha="left",
+                    clip_on=False,
+                )
+            else:
+                x_at_ymax = ymax * rate * 1e6
+                if xmin <= x_at_ymax <= xmax:
+                    ax.text(
+                        x_at_ymax,
+                        ymax,
+                        f"{rate:g} MB/s",
+                        color="0.5",
+                        fontsize=7,
+                        va="bottom",
+                        ha="center",
+                        clip_on=False,
+                    )
+        ax.set_xlim(xmin, xmax)
+        ax.set_ylim(ymin, ymax)
 
     def _write_summary_table(
         self,
@@ -887,7 +1008,7 @@ class BenchmarkVisualizer:
         modality_order = ["Ecephys", "Ophys", "Icephys"]
         methods = [method for method in self.pynwb_read_order if method in set(plot_df[col_name])]
         methods.extend([method for method in plot_df[col_name].dropna().unique() if method not in methods])
-        palette = dict(zip(methods, sns.color_palette("colorblind", n_colors=len(methods))))
+        palette = self._method_palette(methods)
         fig, axes = plt.subplots(1, len(modality_order), figsize=(15, 5), sharex=False, sharey=False)
         for ax, modality in zip(axes, modality_order):
             modality_df = plot_df[plot_df["modality"].eq(modality)]
@@ -901,8 +1022,9 @@ class BenchmarkVisualizer:
                     continue
                 label = self._display_method_label(method)
                 plot_kwargs = {
-                    "marker": "o",
+                    "marker": self._method_marker(method),
                     "markersize": 4,
+                    "linestyle": self._method_linestyle(method),
                     "linewidth": 1.2,
                     "color": palette[method],
                     "alpha": 0.85,
@@ -939,7 +1061,9 @@ class BenchmarkVisualizer:
                 ax.set_ylim(y_min / 1.6, y_max * 1.6)
             ax.set_xscale("log")
             ax.set_yscale("log")
-            ax.set_title(modality)
+            if network_metric in BYTE_NETWORK_METRICS:
+                self._add_throughput_lines(ax, rates_mb_s=(1, 10, 100))
+            ax.set_title(modality, y=1.08)
             ax.grid(True, which="both", linewidth=0.3, alpha=0.35)
             ax.set_xlabel(NETWORK_METRIC_LABELS.get(network_metric, network_metric))
         axes[0].set_ylabel("Runtime (s)")
@@ -954,10 +1078,16 @@ class BenchmarkVisualizer:
         error_bar_sentence = (
             "Error bars show standard deviation across repeated benchmark runs. " if show_error_bars else ""
         )
+        throughput_caption = (
+            "Dashed gray lines indicate constant effective throughput. "
+            if network_metric in BYTE_NETWORK_METRICS
+            else ""
+        )
         caption = (
             f"Remote slicing {metric_label.lower()} vs. runtime for increasing slice sizes ({preload_caption}). "
             "Points show average benchmark measurements and connected lines follow increasing slice size within each method. "
             "Text annotations mark the largest slice size shown for each method. "
+            f"{throughput_caption}"
             f"{error_bar_sentence}Panels separate data modalities."
         )
         caption = self._add_environment_caption(caption)
@@ -1021,7 +1151,7 @@ class BenchmarkVisualizer:
             plot_df.to_csv(self.summary_tables_directory / f"{filename.stem}_summary.csv", index=False)
 
         methods = [method for method in default_order if method in set(plot_df[col_name])]
-        palette = dict(zip(methods, sns.color_palette("colorblind", n_colors=len(methods))))
+        palette = self._method_palette(methods)
         modality_order = ["Ecephys", "Ophys", "Icephys"]
         modality_markers = {"Ecephys": "o", "Ophys": "s", "Icephys": "^"}
         fig, ax = plt.subplots(figsize=(8, 6))
@@ -1035,6 +1165,7 @@ class BenchmarkVisualizer:
                 method_df["network_mean"],
                 method_df["runtime_mean"],
                 color=palette[method],
+                linestyle=self._method_linestyle(method),
                 linewidth=1.2,
                 alpha=0.75,
             )
@@ -1043,7 +1174,7 @@ class BenchmarkVisualizer:
                 title += " - PyNWB"
             elif suffix:
                 title += suffix
-            ax.set_title(title)
+            ax.set_title(title, y=1.08)
             for modality in modality_order:
                 modality_df = method_df[method_df["modality"].eq(modality)]
                 if modality_df.empty:
@@ -1069,10 +1200,16 @@ class BenchmarkVisualizer:
                     ax.plot(modality_df["network_mean"], modality_df["runtime_mean"], **plot_kwargs)
         ax.set_xscale("log")
         ax.set_yscale("log")
+        if network_metric in BYTE_NETWORK_METRICS:
+            throughput_rates = (0.01, 0.1, 1, 10) if suffix == "_pynwb" else (0.1, 1, 10)
+            self._add_throughput_lines(ax, rates_mb_s=throughput_rates)
         ax.grid(True, which="both", linewidth=0.3, alpha=0.35)
         ax.set_xlabel(NETWORK_METRIC_LABELS.get(network_metric, network_metric))
         ax.set_ylabel("Runtime (s)")
-        method_handles = [plt.Line2D([], [], color=palette[method], linewidth=1.5) for method in methods]
+        method_handles = [
+            plt.Line2D([], [], color=palette[method], linestyle=self._method_linestyle(method), linewidth=1.5)
+            for method in methods
+        ]
         method_labels = [self._display_method_label(method) for method in methods]
         method_legend = ax.legend(method_handles, method_labels, loc="upper left", fontsize=8, title="Method")
         modality_handles = [
@@ -1086,10 +1223,16 @@ class BenchmarkVisualizer:
         error_bar_sentence = (
             "Error bars show standard deviation across repeated benchmark runs. " if show_error_bars else ""
         )
+        throughput_caption = (
+            "Dashed gray lines indicate constant effective throughput. "
+            if network_metric in BYTE_NETWORK_METRICS
+            else ""
+        )
         caption = (
             f"Network-tracking {output_family} {metric_label.lower()} vs. runtime. "
             "Points show average benchmark measurements. "
             "Connected lines link modalities within each method. "
+            f"{throughput_caption}"
             f"{error_bar_sentence}Marker shapes distinguish modalities."
         )
         caption = self._add_environment_caption(caption)
@@ -1319,6 +1462,8 @@ class BenchmarkVisualizer:
             self._record_skipped_output("plot", filename, "No data available to plot.")
             return
 
+        resolved_palette = self._resolve_palette(df=df, group=group, order=metric_order, palette=palette)
+
         g = sns.catplot(
             data=df,
             x="value",
@@ -1327,7 +1472,7 @@ class BenchmarkVisualizer:
             row=row,
             hue=group,
             sharex=sharex,
-            palette=palette,
+            palette=resolved_palette,
             kind=kind,
             order=metric_order,
             legend=False,
@@ -1385,6 +1530,9 @@ class BenchmarkVisualizer:
             self._record_skipped_output("plot", filename, "No data available to plot.")
             return
 
+        palette = self._resolve_palette(df=df, group=group, order=metric_order, palette="Paired")
+        style_kwargs = self._method_style_kwargs(metric_order)
+
         g = sns.catplot(
             data=df,
             x="slice_number",
@@ -1394,9 +1542,10 @@ class BenchmarkVisualizer:
             hue=group,
             hue_order=metric_order,
             sharex=sharex,
-            palette="Paired",
+            palette=palette,
             sharey=False,
             kind="point",
+            **style_kwargs,
         )
 
         if caption is not None:
@@ -1683,7 +1832,7 @@ class BenchmarkVisualizer:
             x_range,
             y_remote,
             color=color,
-            linestyle="solid",
+            linestyle=self._method_linestyle(benchmark_name),
             linewidth=2,
             label=self._display_method_label(benchmark_name),
         )
@@ -1839,19 +1988,9 @@ class BenchmarkVisualizer:
         benchmarks = sorted(collected_stream.select(group).unique().to_series().to_list())
 
         # Create mappings for plot
-        hdf5_colors = iter(sns.color_palette("Greens", n_colors=len([b for b in benchmarks if b.startswith("hdf5")])))
-        zarr_colors = iter(sns.color_palette("Reds", n_colors=len([b for b in benchmarks if b.startswith("zarr")])))
-        lindi_colors = iter(sns.color_palette("Blues", n_colors=len([b for b in benchmarks if b.startswith("lindi")])))
         modality_to_col = {mod: i for i, mod in enumerate(modalities)}
         row_to_row = {rv: i for i, rv in enumerate(row_values)}
-        benchmarks_to_color = {}
-        for bm in benchmarks:
-            if bm.startswith("hdf5"):
-                benchmarks_to_color[bm] = next(hdf5_colors)
-            elif bm.startswith("zarr"):
-                benchmarks_to_color[bm] = next(zarr_colors)
-            else:
-                benchmarks_to_color[bm] = next(lindi_colors)
+        benchmarks_to_color = self._method_palette(benchmarks)
 
         # Create subplots
         fig, axes = plt.subplots(nrows=len(row_values), ncols=len(modalities), figsize=(15, 10), squeeze=False)
@@ -2110,6 +2249,7 @@ class BenchmarkVisualizer:
         )
 
         method_order = self.pynwb_read_order if order is None else order
+        palette = self._method_palette(method_order)
         g = sns.catplot(
             data=df,
             x="environment_timepoint",
@@ -2120,9 +2260,10 @@ class BenchmarkVisualizer:
             hue_order=method_order,
             order=sorted(df["environment_timepoint"].unique()),
             sharex=True,
-            palette="Paired",
+            palette=palette,
             sharey=False,
             kind="point",
+            **self._method_style_kwargs(method_order),
         )
         if g._legend is not None:
             display_labels = dict(zip(method_order, self._display_method_labels(method_order)))
