@@ -16,7 +16,7 @@ from ._configure_machine import (
     generate_human_readable_machine_name,
     generate_machine_file,
 )
-from ._reduce_results import reduce_results
+from ._reduce_results import reduce_results, validate_environment_info_file
 
 __all__ = [
     "clean_cache",
@@ -32,4 +32,5 @@ __all__ = [
     "read_config",
     "reduce_results",
     "set_cache_directory",
+    "validate_environment_info_file",
 ]
