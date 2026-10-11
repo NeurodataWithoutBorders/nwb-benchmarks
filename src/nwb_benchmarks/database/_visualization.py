@@ -45,7 +45,7 @@ DEFAULT_METHOD_COLORS = {
     "hdf5 h5py ros3": "#000000",
     "lindi h5py": "#999999",
     "zarr s3": "#F0E442",
-    "zarr s3 force no consolidated": "#9467BD",
+    "zarr s3 force no consolidated": "#8C510A",
 }
 DEFAULT_METHOD_COLORS.update(
     {
