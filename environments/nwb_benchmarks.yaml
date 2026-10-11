@@ -1,6 +1,6 @@
 name: nwb_benchmarks
 dependencies:
-  - python=3.14.8
+  - python=3.13.16
   - git=2.56.0
   - conda-forge::h5py>=3.2
   - pip

@@ -29,6 +29,20 @@ Writing thorough docstrings is encouraged; please follow the Numpy style.
 Import and submodule structure follows ``scikit-learn`` standard.
 
 
+Unit Tests
+----------
+
+The ``tests`` directory holds unit tests for the code around the benchmarks, such as the reduction of ASV results and
+the helpers of the incremental slicing benchmarks. They run offline and do not run any benchmark. To run them...
+
+.. code-block::
+
+    pip install -e . --group test
+    pytest tests
+
+The CI runs them on every pull request, before the benchmark smoke test.
+
+
 Customized Machine Header
 -------------------------
 
