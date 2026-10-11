@@ -124,7 +124,11 @@ def main() -> None:
             shell = sys.platform == "win32"  # Use shell on Windows
             raw_environment_info_file_path = asv_root / ".raw_environment_info.txt"
             with open(file=raw_environment_info_file_path, mode="w") as stdout:
-                environment_info_process = subprocess.Popen(args=["conda", "list"], stdout=stdout, shell=shell)
+                # A bare `conda list` reports the shell's active environment, which need not be the one running
+                # the benchmarks (e.g., when invoked without `conda activate`), so target this interpreter's prefix
+                environment_info_process = subprocess.Popen(
+                    args=["conda", "list", "--prefix", sys.prefix], stdout=stdout, shell=shell
+                )
                 environment_info_process.wait()
 
             if not raw_environment_info_file_path.exists():

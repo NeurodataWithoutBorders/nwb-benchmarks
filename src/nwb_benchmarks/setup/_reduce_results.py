@@ -40,6 +40,16 @@ def reduce_results(machine_id: str, raw_results_file_path: pathlib.Path, raw_env
     parsed_environment_info = _parse_environment_info(raw_environment_info=raw_environment_info)
     environment_id = get_dictionary_checksum(dictionary=parsed_environment_info)
 
+    # Only warn, since failing here would discard the results of a long benchmark run
+    recorded_package_names = {package.get("name") for package in parsed_environment_info[sys.version]}
+    if "pynwb" not in recorded_package_names:
+        message = (
+            f"The recorded environment info at {raw_environment_info_file_path} does not list 'pynwb', so it likely "
+            f"describes a different conda environment than the one running the benchmarks ({sys.prefix}). "
+            f"The results will still be saved under environment ID {environment_id}."
+        )
+        warnings.warn(message=message)
+
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
     reduced_results = dict()
