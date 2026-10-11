@@ -228,6 +228,19 @@ select a single parameter set of a benchmark. For example, to run only the ophys
 
     nwb_benchmarks run --bench "time_remote_file_reading.HDF5H5pyFileReadBenchmark.time_read_hdf5_h5py_remfile_no_cache\(\{'name': 'OphysTestCase'"
 
+One benchmark at random
+~~~~~~~~~~~~~~~~~~~~~~~
+
+To run a single benchmark chosen at random from the suite, with all of its parameter sets...
+
+.. code-block::
+
+    nwb_benchmarks run --random
+
+The benchmark is chosen among those that would run, so a benchmark disabled through the environment variables above
+is never chosen. Its name is printed before the run starts. Scheduled runners use this to spread the suite over many
+short runs instead of one long one. ``--random`` cannot be combined with ``--bench``.
+
 Debug mode
 ~~~~~~~~~~
 

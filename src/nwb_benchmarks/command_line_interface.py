@@ -13,10 +13,13 @@ import warnings
 from .core import clean_results
 from .globals import LOGS_DIR
 from .setup import (
+    benchmark_name_pattern,
     capture_environment,
     clean_cache,
+    discover_benchmarks,
     generate_machine_file,
     reduce_results,
+    select_random_benchmark,
     set_cache_directory,
 )
 
@@ -95,11 +98,21 @@ def main() -> None:
 
     debug_mode = "--debug" in flags_list
     bench_mode = "--bench" in flags_list
+    random_mode = "--random" in flags_list
+    if bench_mode and random_mode:
+        raise ValueError("Use either --bench or --random, not both.")
     if bench_mode:
         specific_benchmark_pattern = flags_list[flags_list.index("--bench") + 1]
 
     if command == "run":
         try:
+            if random_mode:
+                # One benchmark, chosen among those that would run, with all of its parameter sets
+                benchmark_name = select_random_benchmark(discover_benchmarks())
+                specific_benchmark_pattern = benchmark_name_pattern(benchmark_name)
+                bench_mode = True
+                print(f"Randomly selected benchmark: {benchmark_name}", flush=True)
+
             # Create .asv directory at GitHub repository root
             asv_root = pathlib.Path(__file__).parent.parent.parent / ".asv"
             asv_root.mkdir(exist_ok=True)
