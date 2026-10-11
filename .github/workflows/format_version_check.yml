@@ -1,0 +1,56 @@
+name: Format Version Check
+
+# Warn-only: whether DATABASE_VERSION / MACHINE_FILE_VERSION need a bump depends on what the change means,
+# which cannot be determined from the diff. See AGENTS.md, "Version bumps".
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/nwb_benchmarks/setup/_reduce_results.py"
+      - "src/nwb_benchmarks/database/**"
+      - "src/nwb_benchmarks/setup/_configure_machine.py"
+
+jobs:
+  format-version-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check format versions
+        run: |
+          BASE="origin/${{ github.base_ref }}"
+          CHANGED=$(git diff --name-only "$BASE"...HEAD)
+
+          get_version() {  # <git ref or "WORKTREE"> <constant name>
+            if [ "$1" = "WORKTREE" ]; then
+              cat src/nwb_benchmarks/globals.py
+            else
+              git show "$1:src/nwb_benchmarks/globals.py"
+            fi | sed -n "s/^$2 = \"\(.*\)\"/\1/p"
+          }
+
+          check() {  # <constant name> <description> <grep pattern of watched paths>
+            if ! echo "$CHANGED" | grep -qE "$3"; then
+              return
+            fi
+            BASE_VERSION=$(get_version "$BASE" "$1")
+            PR_VERSION=$(get_version WORKTREE "$1")
+            echo "$1: base=$BASE_VERSION, PR=$PR_VERSION"
+            if [ "$BASE_VERSION" = "$PR_VERSION" ]; then
+              MESSAGE="This PR changes code related to $2 but $1 (src/nwb_benchmarks/globals.py) is unchanged ($PR_VERSION). If the structure or meaning of that output changed, bump it; otherwise ignore this warning. See AGENTS.md, 'Version bumps'."
+              echo "::warning title=$1 not bumped::$MESSAGE"
+              echo "⚠️ $MESSAGE" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "$1 bumped from $BASE_VERSION to $PR_VERSION ✓"
+            fi
+          }
+
+          check DATABASE_VERSION "the reduced results format" '^src/nwb_benchmarks/(setup/_reduce_results\.py|database/)'
+          check MACHINE_FILE_VERSION "the machine file" '^src/nwb_benchmarks/setup/_configure_machine\.py$'
