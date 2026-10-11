@@ -1,0 +1,32 @@
+name: Version Check
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/nwb_benchmarks/**"
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check package version bump
+        run: |
+          git show origin/${{ github.base_ref }}:pyproject.toml > /tmp/base_pyproject.toml
+          PR_VERSION=$(python3 -c "import pathlib, tomllib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          BASE_VERSION=$(python3 -c "import pathlib, tomllib; print(tomllib.loads(pathlib.Path('/tmp/base_pyproject.toml').read_text())['project']['version'])")
+          echo "Base version: $BASE_VERSION"
+          echo "PR version:   $PR_VERSION"
+          if [ "$PR_VERSION" = "$BASE_VERSION" ]; then
+            echo "::error::Code under src/nwb_benchmarks/ changed but the package version was not bumped. Please update 'version' in pyproject.toml (see AGENTS.md, 'Version bumps'; also consider DATABASE_VERSION and MACHINE_FILE_VERSION in src/nwb_benchmarks/globals.py)."
+            exit 1
+          fi
+          echo "Version bumped from $BASE_VERSION to $PR_VERSION ✓"
