@@ -43,12 +43,17 @@ def reduce(tmp_path, monkeypatch):
         monkeypatch.setattr(_reduce_results, name, directory)
     (tmp_path / "machines_dir" / "machine-test.json").write_text("{}")
 
-    raw_environment_info_file_path = tmp_path / "environment.txt"
+    raw_environment_info_file_path = tmp_path / "environment.json"
     raw_environment_info_file_path.write_text(
-        "# packages in environment at /conda/envs/nwb_benchmarks:\n"
-        "#\n"
-        "# Name                    Version                   Build  Channel\n"
-        "pynwb                     3.1.0                    pypi_0    pypi\n"
+        json.dumps(
+            dict(
+                interpreter=dict(executable="/python", prefix="/env", version="3.11.9"),
+                python_distributions=[dict(name="pynwb", version="3.1.0")],
+                conda=None,
+                runtime_versions=dict(),
+                capture_warnings=[],
+            )
+        )
     )
 
     def _reduce(raw_results_info: dict) -> pathlib.Path:

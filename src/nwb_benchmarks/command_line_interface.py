@@ -2,6 +2,7 @@
 
 import argparse
 import datetime
+import json
 import locale
 import pathlib
 import shutil
@@ -12,6 +13,7 @@ import warnings
 from .core import clean_results
 from .globals import LOGS_DIR
 from .setup import (
+    capture_environment,
     clean_cache,
     generate_machine_file,
     reduce_results,
@@ -119,16 +121,11 @@ def main() -> None:
 
             commit_hash = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode("ascii").strip()
 
-            # Save latest environment list from conda (most thorough)
-            # subprocess tends to have issues inheriting `conda` entrypoint
-            shell = sys.platform == "win32"  # Use shell on Windows
-            raw_environment_info_file_path = asv_root / ".raw_environment_info.txt"
-            with open(file=raw_environment_info_file_path, mode="w") as stdout:
-                environment_info_process = subprocess.Popen(args=["conda", "list"], stdout=stdout, shell=shell)
-                environment_info_process.wait()
-
-            if not raw_environment_info_file_path.exists():
-                raise FileNotFoundError(f"Unable to create environment file at {raw_environment_info_file_path}!")
+            # Record the environment of this interpreter, and fail now rather than after the run if it is wrong
+            raw_environment_info_file_path = asv_root / ".raw_environment_info.json"
+            raw_environment_info = capture_environment()
+            with open(file=raw_environment_info_file_path, mode="w") as io:
+                json.dump(obj=raw_environment_info, fp=io, indent=1)
 
             # Create log file path to capture all output from the ASV run
             timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")

@@ -16,9 +16,11 @@ from ._configure_machine import (
     generate_human_readable_machine_name,
     generate_machine_file,
 )
+from ._environment import capture_environment
 from ._reduce_results import reduce_results
 
 __all__ = [
+    "capture_environment",
     "clean_cache",
     "collect_machine_info",
     "get_cache_directory",

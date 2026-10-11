@@ -201,17 +201,27 @@ class Environment:
         with file_path.open(mode="r") as file_stream:
             data = json.load(fp=file_stream)
 
-        if len(data) > 1:
-            return None
-
         environment_id = file_path.stem.removeprefix("environment-")
-        preamble = next(iter(data.keys()))
+        if "python_distributions" in data:  # Environment files from database version 5.0.0 onward
+            preamble = data["python_version"]
+            packages = {distribution["name"]: distribution["version"] for distribution in data["python_distributions"]}
+            packages.update(
+                {
+                    package["name"]: f'{package["version"]} ({package["build"]})'
+                    for package in data["conda_packages"] or []
+                }
+            )
+            packages.update({f"runtime_{name}": version for name, version in data["runtime_versions"].items()})
+        else:  # Legacy `conda list` text parsed into a single preamble key
+            if len(data) > 1:
+                return None
 
-        packages = {
-            package["name"]: f'{package["version"]} ({package["build"]})'
-            for package in data[preamble]
-            if len(package) >= 3
-        }
+            preamble = next(iter(data.keys()))
+            packages = {
+                package["name"]: f'{package["version"]} ({package["build"]})'
+                for package in data[preamble]
+                if len(package) >= 3
+            }
 
         if not any(packages):
             return None
