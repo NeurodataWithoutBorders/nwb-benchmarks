@@ -16,6 +16,7 @@ from .setup import (
     generate_machine_file,
     reduce_results,
     set_cache_directory,
+    validate_environment_info_file,
 )
 
 # Machine ID for LBL Mac (official benchmark machine)
@@ -124,11 +125,18 @@ def main() -> None:
             shell = sys.platform == "win32"  # Use shell on Windows
             raw_environment_info_file_path = asv_root / ".raw_environment_info.txt"
             with open(file=raw_environment_info_file_path, mode="w") as stdout:
-                environment_info_process = subprocess.Popen(args=["conda", "list"], stdout=stdout, shell=shell)
+                # A bare `conda list` reports the shell's active environment, which need not be the one running
+                # the benchmarks (e.g., when invoked without `conda activate`), so target this interpreter's prefix
+                environment_info_process = subprocess.Popen(
+                    args=["conda", "list", "--prefix", sys.prefix], stdout=stdout, shell=shell
+                )
                 environment_info_process.wait()
 
             if not raw_environment_info_file_path.exists():
                 raise FileNotFoundError(f"Unable to create environment file at {raw_environment_info_file_path}!")
+
+            # Fail now rather than after a long benchmark run if the recorded environment is the wrong one
+            validate_environment_info_file(raw_environment_info_file_path=raw_environment_info_file_path)
 
             # Create log file path to capture all output from the ASV run
             timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
