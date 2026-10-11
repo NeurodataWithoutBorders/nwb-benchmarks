@@ -18,9 +18,6 @@ from .setup import (
     set_cache_directory,
 )
 
-# Machine ID for LBL Mac (official benchmark machine)
-LBL_MAC_MACHINE_ID = "87fee773e425b4b1d3978fbf762d57effb0e8df8"
-
 
 def clone_results_repo(repo_path: pathlib.Path) -> pathlib.Path:
     """
@@ -47,6 +44,7 @@ def generate_figures_command(args: argparse.Namespace) -> None:
         args: Parsed command-line arguments from argparse
     """
     from nwb_benchmarks.database import BenchmarkDatabase, BenchmarkVisualizer
+    from nwb_benchmarks.database._processing import LBL_MAC_MACHINE_IDS
 
     # Determine results directory
     if args.results_dir:
@@ -69,9 +67,11 @@ def generate_figures_command(args: argparse.Namespace) -> None:
     print(f"\nGenerating figures in {output_dir}...")
 
     # Initialize database handler and create parquet file
-    # TODO _ make LBL mac machine ID configurable
+    # TODO _ make LBL mac machine IDs configurable
     db = BenchmarkDatabase(
-        results_directory=results_dir, machine_id=LBL_MAC_MACHINE_ID, exclude_older=args.exclude_older or "2025-11-01"
+        results_directory=results_dir,
+        machine_ids=LBL_MAC_MACHINE_IDS,
+        exclude_older=args.exclude_older or "2025-11-01",
     )
     db.create_database()
 
