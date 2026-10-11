@@ -16,6 +16,7 @@ from .setup import (
     generate_machine_file,
     reduce_results,
     set_cache_directory,
+    validate_environment_info_file,
 )
 
 # Machine ID for LBL Mac (official benchmark machine)
@@ -133,6 +134,9 @@ def main() -> None:
 
             if not raw_environment_info_file_path.exists():
                 raise FileNotFoundError(f"Unable to create environment file at {raw_environment_info_file_path}!")
+
+            # Fail now rather than after a long benchmark run if the recorded environment is the wrong one
+            validate_environment_info_file(raw_environment_info_file_path=raw_environment_info_file_path)
 
             # Create log file path to capture all output from the ASV run
             timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
