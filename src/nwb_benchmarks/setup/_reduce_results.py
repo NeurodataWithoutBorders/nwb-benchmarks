@@ -11,9 +11,9 @@ import subprocess
 import sys
 import warnings
 
+from ._environment import stable_environment_content
 from ..globals import DATABASE_VERSION, ENVIRONMENTS_DIR, MACHINES_DIR, RESULTS_DIR
 from ..utils import get_dictionary_checksum
-from ._environment import stable_environment_content
 
 
 def _parse_environment_info(raw_environment_info: dict) -> dict:
