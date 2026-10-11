@@ -7,7 +7,10 @@ import sys
 import pytest
 
 from nwb_benchmarks.setup import _environment
-from nwb_benchmarks.setup._environment import capture_environment, stable_environment_content
+from nwb_benchmarks.setup._environment import (
+    capture_environment,
+    stable_environment_content,
+)
 from nwb_benchmarks.utils import get_dictionary_checksum
 
 CONDA_JSON = [
