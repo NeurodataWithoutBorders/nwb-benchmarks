@@ -16,10 +16,17 @@ from ._configure_machine import (
     generate_human_readable_machine_name,
     generate_machine_file,
 )
+from ._random_benchmark import (
+    benchmark_name_pattern,
+    discover_benchmarks,
+    select_random_benchmark,
+)
 from ._reduce_results import reduce_results
 
 __all__ = [
+    "benchmark_name_pattern",
     "clean_cache",
+    "discover_benchmarks",
     "collect_machine_info",
     "get_cache_directory",
     "get_benchmarks_config_file_path",
@@ -31,5 +38,6 @@ __all__ = [
     "generate_human_readable_machine_name",
     "read_config",
     "reduce_results",
+    "select_random_benchmark",
     "set_cache_directory",
 ]
