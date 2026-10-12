@@ -264,6 +264,17 @@ Each successful ``nwb_benchmarks run`` writes three kinds of JSON files under ``
 * ``machines/`` and ``environments/`` hold the hardware and package descriptions the results refer to (written
   once per unique configuration).
 
+The environment file describes the interpreter that ran the benchmarks, whether or not its conda environment was
+activated in the shell. ``nwb_benchmarks run`` first records every installed Python distribution (from
+``importlib.metadata``), the conda packages of the prefix of that interpreter (``conda list --prefix <prefix> --json``,
+if a ``conda``, ``mamba`` or ``micromamba`` executable is found), and the versions that the loaded libraries report for
+``h5py``, HDF5, ``zarr``, ``numcodecs``, OpenSSL and the other I/O libraries. The run stops before the benchmarks start if
+``pynwb`` is not installed in that interpreter. The raw capture, including diagnostics such as paths and capture
+warnings, is kept in ``.asv/.raw_environment_info.json``. The ``environments/`` file only keeps the sorted package and
+version content, with keys ``python_version``, ``python_distributions``, ``conda_packages`` (``null`` if conda was
+unavailable) and ``runtime_versions``. The environment ID is the checksum of that content, so it does not depend on
+paths or on the order of the packages.
+
 Results from all contributors are collected in the central
 `nwb-benchmarks-results <https://github.com/NeurodataWithoutBorders/nwb-benchmarks-results>`_ repository, which
 mirrors these three folders. There are two ways to get your files there.

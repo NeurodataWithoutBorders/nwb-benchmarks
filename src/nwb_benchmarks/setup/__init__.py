@@ -17,15 +17,17 @@ from ._configure_machine import (
     generate_machine_file,
     generate_machine_name,
 )
+from ._environment import capture_environment
 from ._random_benchmark import (
     benchmark_name_pattern,
     discover_benchmarks,
     select_random_benchmark,
 )
-from ._reduce_results import reduce_results, validate_environment_info_file
+from ._reduce_results import reduce_results
 
 __all__ = [
     "benchmark_name_pattern",
+    "capture_environment",
     "clean_cache",
     "discover_benchmarks",
     "collect_machine_info",
@@ -42,5 +44,4 @@ __all__ = [
     "reduce_results",
     "select_random_benchmark",
     "set_cache_directory",
-    "validate_environment_info_file",
 ]
