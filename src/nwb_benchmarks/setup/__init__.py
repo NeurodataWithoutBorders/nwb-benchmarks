@@ -15,6 +15,7 @@ from ._configure_machine import (
     collect_machine_info,
     generate_human_readable_machine_name,
     generate_machine_file,
+    generate_machine_name,
 )
 from ._environment import capture_environment
 from ._random_benchmark import (
@@ -38,6 +39,7 @@ __all__ = [
     "get_temporary_file",
     "generate_machine_file",
     "generate_human_readable_machine_name",
+    "generate_machine_name",
     "read_config",
     "reduce_results",
     "select_random_benchmark",
