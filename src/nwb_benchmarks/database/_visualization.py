@@ -2276,8 +2276,9 @@ class BenchmarkVisualizer:
             "Performance trends across different software environment versions over time. "
             "Each line represents a different method, showing how execution time changes as dependencies are updated. "
             "Key dependencies of interest were fixed and environments with YYYY-06-30 timepoints were generated programmatically. "
-            "See the _package_versions utility script for further details."
-            "Note that the 2025-09-01 timepoint is an estimate for approximately when the latest environment was generated. "
+            "See the _package_versions utility script for further details. "
+            "Note that the 2025-09-01 timepoint is an estimate for approximately when that environment was generated. "
+            "The 2026-10-07 timepoint is the Python 3.13 environment, dated by its first benchmark run. "
         )
         g.figure.text(0.5, -0.01, caption, ha="center", va="top", fontsize=9, wrap=True, style="italic")
 
