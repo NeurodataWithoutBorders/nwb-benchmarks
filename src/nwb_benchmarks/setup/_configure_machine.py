@@ -23,10 +23,7 @@ def collect_machine_info() -> Dict[str, Dict[str, Any]]:
     """Collect attributes for uniquely identifying a system and providing metadata associated with performance."""
     machine_info = dict()
 
-    is_github_runner = os.getenv("GITHUB_ACTIONS", False)
-    timestamp = datetime.datetime.now().strftime(format="%Y%m%d%H%M%S")
-    machine_name = f"github-{timestamp}" if is_github_runner else generate_human_readable_machine_name()
-    machine_info["name"] = machine_name
+    machine_info["name"] = generate_machine_name()
     machine_info["version"] = MACHINE_FILE_VERSION
 
     # Hardware info from various Python libraries
@@ -118,8 +115,14 @@ def generate_machine_file() -> str:
 
     machine_info_file_path = MACHINES_DIR / f"machine-{checksum}.json"
     if machine_info_file_path.exists():
-        print(f"\nMachine info exists at:        {machine_info_file_path}\n")
-        return checksum
+        # The name is not part of the checksum, so a machine that was renamed (for example a self-hosted
+        # runner that now reports its runner name) keeps its id; its file is rewritten only when the name changed.
+        with open(file=machine_info_file_path, mode="r") as file_stream:
+            existing_name = json.load(fp=file_stream).get("name")
+        if existing_name == machine_info["name"]:
+            print(f"\nMachine info exists at:        {machine_info_file_path}\n")
+            return checksum
+        print(f"\nMachine name changed from '{existing_name}' to '{machine_info['name']}'.")
 
     with open(file=machine_info_file_path, mode="w") as file_stream:
         json.dump(obj=machine_info, fp=file_stream, indent=1)
@@ -128,11 +131,27 @@ def generate_machine_file() -> str:
     return checksum
 
 
+def generate_machine_name() -> str:
+    """
+    Choose the name recorded in the machine file.
+
+    Under GitHub Actions the name is the runner's name (`RUNNER_NAME`), which identifies a self-hosted runner such
+    as `ackermann` across runs. Hosted runners get a unique name instead (`github-<timestamp>`), and so does any
+    run where the variable is missing. Outside GitHub Actions the name is a random human-readable one.
+    """
+    if os.getenv("GITHUB_ACTIONS"):
+        runner_name = os.getenv("RUNNER_NAME", "")
+        if runner_name and not runner_name.startswith("GitHub Actions"):
+            return runner_name
+        timestamp = datetime.datetime.now().strftime(format="%Y%m%d%H%M%S")
+        return f"github-{timestamp}"
+    return generate_human_readable_machine_name()
+
+
 def generate_human_readable_machine_name() -> str:
     """
     There are about 4 million possible combinations of predicate/objects in `friendlywords`.
 
-    GitHub Actions runners get unique names based on the timestamp of the run.
     Natural collisions should be able to be disambiguated by the peripheral machine info.
     """
     name = "".join(word.capitalize() for word in friendlywords.generate(command="po", as_list=True))
