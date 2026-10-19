@@ -262,19 +262,9 @@ class BenchmarkDatabase:
 
     def filter_results_for_environment_timepoints(self) -> pl.LazyFrame:
         """Filter environments to only include those matching specified timepoints."""
-        # Derive the timepoint from the results rather than the environments table, since an environment whose
-        # recorded package list lacks every package of interest has no rows there to join on.
-        timepoint_by_environment_id = {v: k for k, v in self.environment_timepoints.items()}
-        filtered_results = (
-            self.join_results_with_environments()
-            .filter(pl.col("environment_id").is_in(list(timepoint_by_environment_id)))
-            .with_columns(
-                pl.col("environment_id")
-                .replace_strict(timepoint_by_environment_id, return_dtype=pl.String)
-                .alias("environment_timepoint")
-            )
+        return self.join_results_with_environments().filter(
+            pl.col("environment_id").is_in(list(self.environment_timepoints.values()))
         )
-        return filtered_results
 
     def filter_tests(self, benchmark_type: str) -> pl.LazyFrame:
         """Filter benchmark tests."""
