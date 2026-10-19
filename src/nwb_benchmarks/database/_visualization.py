@@ -993,14 +993,16 @@ class BenchmarkVisualizer:
             .reset_index()
         )
         plot_df = runtime_summary.merge(network_summary, on=group_cols, how="inner")
-        plot_df = plot_df[(plot_df["runtime_mean"] > 0) & (plot_df["network_mean"] > 0)].copy()
+        plot_df = plot_df[plot_df["runtime_mean"] > 0].copy()
         if plot_df.empty:
             self._record_skipped_output(
                 "plot",
                 filename.name,
-                f"No positive paired runtime and {network_metric} measurements for {preload_caption} slicing.",
+                f"No positive paired runtime measurements for {preload_caption} slicing.",
             )
             return
+
+        plot_df["network_mean_is_zero"] = plot_df["network_mean"].eq(0)
 
         if self.summary_tables_directory is not None:
             plot_df.to_csv(self.summary_tables_directory / f"{filename.stem}_summary.csv", index=False)
@@ -1018,6 +1020,7 @@ class BenchmarkVisualizer:
                 continue
             for method in methods:
                 method_df = modality_df[modality_df[col_name].eq(method)].sort_values("slice_number")
+                method_df = method_df[method_df["network_mean"] > 0]
                 if method_df.empty:
                     continue
                 label = self._display_method_label(method)
@@ -1051,10 +1054,48 @@ class BenchmarkVisualizer:
                     fontsize=7,
                     color=palette[method],
                 )
-            x_min = modality_df["network_mean"].min()
-            x_max = modality_df["network_mean"].max()
-            y_min = modality_df["runtime_mean"].min()
-            y_max = modality_df["runtime_mean"].max()
+            zero_transfer_df = modality_df[modality_df["network_mean_is_zero"]]
+            if not zero_transfer_df.empty:
+                zero_methods = [method for method in methods if method in set(zero_transfer_df[col_name])]
+                if zero_methods:
+                    inset_ax = ax.inset_axes([0.58, 0.095, 0.40, 0.34])
+                    for zero_method in zero_methods:
+                        zero_method_df = zero_transfer_df[zero_transfer_df[col_name].eq(zero_method)].sort_values(
+                            "slice_number"
+                        )
+                        if zero_method_df.empty:
+                            continue
+                        inset_ax.plot(
+                            zero_method_df["slice_number"],
+                            zero_method_df["runtime_mean"],
+                            marker=self._method_marker(zero_method),
+                            markersize=3,
+                            linestyle=self._method_linestyle(zero_method),
+                            linewidth=1.0,
+                            color=palette[zero_method],
+                            alpha=0.85,
+                            label=self._display_method_label(zero_method),
+                        )
+                    inset_ax.set_title("methods with 0 bytes transferred", fontsize=7)
+                    inset_ax.set_xlabel("slice index", fontsize=6, labelpad=0)
+                    inset_ax.tick_params(axis="y", labelsize=6)
+                    inset_ax.tick_params(axis="x", labelsize=6)
+                    inset_ax.set_ylabel("Runtime (s)", fontsize=6, labelpad=0)
+                    zero_runtime_values = zero_transfer_df.loc[
+                        zero_transfer_df[col_name].isin(zero_methods), "runtime_mean"
+                    ]
+                    if (
+                        (zero_runtime_values > 0).all()
+                        and not zero_runtime_values.empty
+                        and zero_runtime_values.max() / zero_runtime_values.min() > 20
+                    ):
+                        inset_ax.set_yscale("log")
+                    inset_ax.grid(True, linewidth=0.25, alpha=0.35)
+            positive_modality_df = modality_df[modality_df["network_mean"] > 0]
+            x_min = positive_modality_df["network_mean"].min()
+            x_max = positive_modality_df["network_mean"].max()
+            y_min = positive_modality_df["runtime_mean"].min()
+            y_max = positive_modality_df["runtime_mean"].max()
             if x_min > 0 and x_max > 0:
                 ax.set_xlim(x_min / 1.6, x_max * 1.6)
             if y_min > 0 and y_max > 0:
@@ -1087,6 +1128,7 @@ class BenchmarkVisualizer:
             f"Remote slicing {metric_label.lower()} vs. runtime for increasing slice sizes ({preload_caption}). "
             "Points show average benchmark measurements and connected lines follow increasing slice size within each method. "
             "Text annotations mark the largest slice size shown for each method. "
+            "Inset curve plots show runtime by slice index for methods whose paired slicing measurements had zero measured network transfer. "
             f"{throughput_caption}"
             f"{error_bar_sentence}Panels separate data modalities."
         )
