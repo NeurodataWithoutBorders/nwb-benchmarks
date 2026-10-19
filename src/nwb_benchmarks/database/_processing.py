@@ -32,7 +32,7 @@ ENVIRONMENT_TIMEPOINTS = {
     "2024-06-30": "9e225115ea6c99b60d419454a9457bb5db93c7b7",  # all timepoints based on lbl mac
     "2025-06-30": "15d059d5b6b9047f9bbeb4ac77bb4461411904c7",
     "2025-09-01": "052cb4d925793bbbc270d9384a60bc24023025b7",  # note - this environment was created after 2025-09-01 but exact date unknown
-    "2026-10-07": "7dae06053c6587622d78f9b3ca1b81e3840e71f7",  # Python 3.13 environment, first run on 2026-10-07
+    "2026-10-07": "42bfe7119727f6ab276361065e27b6e5fa5bbdc9",  # Python 3.13 environment, first run on 2026-10-07
 }
 
 
