@@ -272,7 +272,7 @@ Automated runs
 ~~~~~~~~~~~~~~
 
 Machines that run the suite regularly should be registered as self-hosted GitHub Actions runners of the
-`nwb-benchmarks-runner <https://github.com/NeurodataWithoutBorders/nwb-benchmarks-runner>`_ repository. Its scheduled
+`nwb-benchmarks-runners <https://github.com/brain-bbqs-runners/nwb-benchmarks-runners>`_ repository. Its scheduled
 workflows run the suite, then commit the new files to the central repository using a token that you provide, so
 results can be contributed by many people without sharing credentials. See that repository's README for the
 setup steps.
