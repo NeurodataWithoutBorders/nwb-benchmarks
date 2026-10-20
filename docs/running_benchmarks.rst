@@ -273,9 +273,10 @@ Automated runs
 
 Machines that run the suite regularly should be registered as self-hosted GitHub Actions runners of the
 `nwb-benchmarks-runners <https://github.com/brain-bbqs-runners/nwb-benchmarks-runners>`_ repository. Its scheduled
-workflows run the suite, then commit the new files to the central repository using a token that you provide, so
-results can be contributed by many people without sharing credentials. See that repository's README for the
-setup steps.
+workflows run the suite, then commit the new files to the central repository with one upload token that all runners
+share. The token is stored as a secret of the runners repository and is only used by a job on a GitHub-hosted runner,
+so it never reaches a contributor's machine and results can be contributed by many people without sharing
+credentials. See the runners repository's README for the setup steps.
 
 Manual contribution
 ~~~~~~~~~~~~~~~~~~~
