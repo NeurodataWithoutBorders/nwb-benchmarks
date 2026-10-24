@@ -21,10 +21,18 @@ PACKAGES_OF_INTEREST = [
     "pynwb",
 ]
 
+# The LBL Mac (official benchmark machine) received a new machine ID when the benchmark environment moved to
+# Python 3.13, because ASV's machine name and platform string changed. The hardware is identical.
+LBL_MAC_MACHINE_IDS = [
+    "87fee773e425b4b1d3978fbf762d57effb0e8df8",
+    "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+]
+
 ENVIRONMENT_TIMEPOINTS = {
     "2024-06-30": "9e225115ea6c99b60d419454a9457bb5db93c7b7",  # all timepoints based on lbl mac
     "2025-06-30": "15d059d5b6b9047f9bbeb4ac77bb4461411904c7",
     "2025-09-01": "052cb4d925793bbbc270d9384a60bc24023025b7",  # note - this environment was created after 2025-09-01 but exact date unknown
+    "2026-10-07": "42bfe7119727f6ab276361065e27b6e5fa5bbdc9",  # Python 3.13 environment, first run on 2026-10-07
 }
 
 
@@ -36,6 +44,7 @@ class BenchmarkDatabase:
         results_directory: Optional[Path] = None,
         db_directory: Optional[Path] = None,
         machine_id: str = None,
+        machine_ids: Optional[List[str]] = None,
         exclude_older: str = None,
         environment_id: str = None,
         environment_ids: Optional[List[str]] = None,
@@ -46,8 +55,10 @@ class BenchmarkDatabase:
             results_directory: Directory containing benchmark results
             db_directory: Directory for database storage
             machine_id: Machine ID for filtering results
+            machine_ids: Machine IDs for filtering results, for a machine whose ID changed over time
         """
         self.machine_id = machine_id
+        self.machine_ids = machine_ids
         self.packages_of_interest = PACKAGES_OF_INTEREST
         self.environment_timepoints = ENVIRONMENT_TIMEPOINTS
         self.exclude_older = exclude_older
@@ -110,6 +121,7 @@ class BenchmarkDatabase:
             df
             # Filter for specific machine early to reduce data volume
             .filter(pl.col("machine_id") == self.machine_id if self.machine_id is not None else pl.lit(True))
+            .filter(pl.col("machine_id").is_in(self.machine_ids) if self.machine_ids is not None else pl.lit(True))
             # Filter for timestamp early to reduce data volume
             .filter(
                 pl.col("timestamp") >= pl.lit(self.exclude_older).str.to_datetime()
@@ -265,6 +277,7 @@ class BenchmarkDatabase:
             results_directory=self.results_directory,
             db_directory=self.db_directory,
             machine_id=self.machine_id,
+            machine_ids=self.machine_ids,
             exclude_older=self.exclude_older,
             environment_id=environment_id,
         )
@@ -275,6 +288,7 @@ class BenchmarkDatabase:
             results_directory=self.results_directory,
             db_directory=self.db_directory,
             machine_id=self.machine_id,
+            machine_ids=self.machine_ids,
             exclude_older=self.exclude_older,
             environment_ids=environment_ids,
         )
