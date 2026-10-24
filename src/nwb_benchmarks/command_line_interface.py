@@ -2,6 +2,7 @@
 
 import argparse
 import datetime
+import json
 import locale
 import pathlib
 import shutil
@@ -13,13 +14,13 @@ from .core import clean_results
 from .globals import LOGS_DIR
 from .setup import (
     benchmark_name_pattern,
+    capture_environment,
     clean_cache,
     discover_benchmarks,
     generate_machine_file,
     reduce_results,
     select_random_benchmark,
     set_cache_directory,
-    validate_environment_info_file,
 )
 
 # Machine ID for LBL Mac (official benchmark machine)
@@ -133,23 +134,11 @@ def main() -> None:
 
             commit_hash = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode("ascii").strip()
 
-            # Save latest environment list from conda (most thorough)
-            # subprocess tends to have issues inheriting `conda` entrypoint
-            shell = sys.platform == "win32"  # Use shell on Windows
-            raw_environment_info_file_path = asv_root / ".raw_environment_info.txt"
-            with open(file=raw_environment_info_file_path, mode="w") as stdout:
-                # A bare `conda list` reports the shell's active environment, which need not be the one running
-                # the benchmarks (e.g., when invoked without `conda activate`), so target this interpreter's prefix
-                environment_info_process = subprocess.Popen(
-                    args=["conda", "list", "--prefix", sys.prefix], stdout=stdout, shell=shell
-                )
-                environment_info_process.wait()
-
-            if not raw_environment_info_file_path.exists():
-                raise FileNotFoundError(f"Unable to create environment file at {raw_environment_info_file_path}!")
-
-            # Fail now rather than after a long benchmark run if the recorded environment is the wrong one
-            validate_environment_info_file(raw_environment_info_file_path=raw_environment_info_file_path)
+            # Record the environment of this interpreter, and fail now rather than after the run if it is wrong
+            raw_environment_info_file_path = asv_root / ".raw_environment_info.json"
+            raw_environment_info = capture_environment()
+            with open(file=raw_environment_info_file_path, mode="w") as io:
+                json.dump(obj=raw_environment_info, fp=io, indent=1)
 
             # Create log file path to capture all output from the ASV run
             timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")

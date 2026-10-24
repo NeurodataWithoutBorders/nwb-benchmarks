@@ -10,47 +10,24 @@ import shutil
 import subprocess
 import sys
 import warnings
-from typing import Dict, List
 
+from ._environment import stable_environment_content
 from ..globals import DATABASE_VERSION, ENVIRONMENTS_DIR, MACHINES_DIR, RESULTS_DIR
 from ..utils import get_dictionary_checksum
 
 
-def _parse_environment_info(raw_environment_info: List[str]) -> Dict[str, List[Dict[str, str]]]:
-    """Turn the results of `conda list` printout to a JSON dictionary."""
-    header_stripped = raw_environment_info[3:]
-    newline_stripped = [line.rstrip("\n") for line in header_stripped]
-    # Tried several regex but none quite did the trick in all cases
-    spacing_stripped = [[x for x in line.split(" ") if x] for line in newline_stripped]
+def _parse_environment_info(raw_environment_info: dict) -> dict:
+    """Reduce the raw JSON environment capture to its stable content, and warn if it looks wrong."""
+    environment_info = stable_environment_content(raw_environment=raw_environment_info)
 
-    keys = ["name", "version", "build", "channel"]
-    parsed_environment = {
-        sys.version: [{key: value for key, value in zip(keys, values)} for values in spacing_stripped]
-    }
-
-    return parsed_environment
-
-
-def _validate_environment_info(parsed_environment_info: Dict[str, List[Dict[str, str]]], source: pathlib.Path) -> None:
-    """Raise if the recorded environment does not list `pynwb`, i.e., it is not the environment running the benchmarks."""
-    recorded_package_names = {package.get("name") for package in parsed_environment_info[sys.version]}
-    if "pynwb" not in recorded_package_names:
-        message = (
-            f"The recorded environment info at {source} does not list 'pynwb', so it likely describes a different "
-            f"conda environment than the one running the benchmarks ({sys.prefix}). Please activate the environment "
-            "the benchmarks are installed in and try again."
+    # Second line of defence; `capture_environment` already refuses to start the run without `pynwb`
+    if "pynwb" not in {distribution["name"] for distribution in environment_info["python_distributions"]}:
+        interpreter = raw_environment_info["interpreter"]
+        warnings.warn(
+            "`pynwb` is missing from the recorded environment, so it was likely captured from the wrong interpreter "
+            f"(sys.executable={interpreter['executable']}, sys.prefix={interpreter['prefix']})."
         )
-        raise ValueError(message)
-
-
-def validate_environment_info_file(raw_environment_info_file_path: pathlib.Path) -> None:
-    """Raise if the `conda list` output saved at the given path does not describe the benchmarks environment."""
-    with open(file=raw_environment_info_file_path, mode="r") as io:
-        raw_environment_info = io.readlines()
-    _validate_environment_info(
-        parsed_environment_info=_parse_environment_info(raw_environment_info=raw_environment_info),
-        source=raw_environment_info_file_path,
-    )
+    return environment_info
 
 
 def reduce_results(machine_id: str, raw_results_file_path: pathlib.Path, raw_environment_info_file_path: pathlib.Path):
@@ -58,11 +35,9 @@ def reduce_results(machine_id: str, raw_results_file_path: pathlib.Path, raw_env
     with open(file=raw_results_file_path, mode="r") as io:
         raw_results_info = json.load(fp=io)
     with open(file=raw_environment_info_file_path, mode="r") as io:
-        raw_environment_info = io.readlines()
+        raw_environment_info = json.load(fp=io)
     parsed_environment_info = _parse_environment_info(raw_environment_info=raw_environment_info)
     environment_id = get_dictionary_checksum(dictionary=parsed_environment_info)
-
-    _validate_environment_info(parsed_environment_info=parsed_environment_info, source=raw_environment_info_file_path)
 
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
 
