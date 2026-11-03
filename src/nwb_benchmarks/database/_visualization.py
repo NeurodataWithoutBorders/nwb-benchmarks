@@ -2137,7 +2137,8 @@ class BenchmarkVisualizer:
                     "n_runs": int(stream_group["n"].min()),
                     "n_slices": n_slices,
                     "stream_download_time": stream_group["avg_download_time"].iloc[0],
-                    "stream_open_time": stream_group["median"].iloc[0],
+                    # median of the measured value alone, so LINDI's JSON download is not counted as open time
+                    "stream_open_time": stream_group["median_value"].iloc[0],
                     "stream_total_time": stream_group["median"].iloc[-1],
                     "download_format": format_family,
                     "download_time": download_group["avg_download_time"].iloc[0] if not download_group.empty else None,
@@ -2145,7 +2146,9 @@ class BenchmarkVisualizer:
                         download_group["median"].iloc[-1] if not download_group.empty else None
                     ),
                     "crossover_slice_index": crossover_index,
-                    "crossover_fraction_read": None if crossover_index is None else crossover_index / n_slices,
+                    "crossover_fraction_of_slices_read": (
+                        None if crossover_index is None else crossover_index / n_slices
+                    ),
                 }
             )
 
@@ -2172,6 +2175,7 @@ class BenchmarkVisualizer:
             .agg(
                 n=("total_time", "count"),
                 median=("total_time", "median"),
+                median_value=("value", "median"),
                 min=("total_time", "min"),
                 max=("total_time", "max"),
                 avg_download_time=("avg_download_time", "mean"),
@@ -2265,8 +2269,9 @@ class BenchmarkVisualizer:
         )
 
         caption = self._add_environment_caption(
-            "Measured cumulative time to open a file and read an array slice by slice along the time axis "
-            "(Icephys: one TimeSeries at a time) until the full array has been read. "
+            "Measured cumulative time to open a file and read an array slice by slice along its full time axis. "
+            "Ecephys reads only the first 32 channels of each time slice, Ophys reads full frames, and Icephys reads "
+            "one complete TimeSeries at a time. "
             "Solid lines show streaming with PyNWB, where the first point is the file open time. "
             "The LINDI curves include the download of the LINDI JSON reference file. "
             "Dashed lines show the mean full-file download time plus local open and read times. "
@@ -2557,7 +2562,7 @@ class BenchmarkVisualizer:
         # baseline download line + time to open + slice locally vs. number of slices
         # time to open + slice locally vs. number of slices
         self.plot_download_vs_stream_benchmarks(db)
-        # measured cumulative open + slice-by-slice reads of the full array, streaming vs. download + local
+        # measured cumulative open + slice-by-slice reads along the full time axis, streaming vs. download + local
         self.plot_incremental_slicing_benchmarks(db)
 
     def plot_all(self, db: BenchmarkDatabase, environment_timepoints: Optional[Dict[str, str]] = None):
