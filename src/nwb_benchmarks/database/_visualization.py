@@ -85,6 +85,10 @@ NETWORK_METRIC_LABELS = {
     "total_transfer_time_in_seconds": "Total transfer time (s)",
 }
 
+FORMAT_FAMILY_LABELS = {"hdf5": "HDF5", "zarr": "Zarr"}
+
+MODALITY_ORDER = ["Ecephys", "Ophys", "Icephys"]
+
 BYTE_NETWORK_METRICS = {metric for metric in NETWORK_METRIC_LABELS if metric.endswith("_in_bytes")}
 
 
@@ -1878,17 +1882,19 @@ class BenchmarkVisualizer:
             linewidth=2,
             label=self._display_method_label(benchmark_name),
         )
-        if benchmark_name.startswith("hdf5"):
-            download_color = sns.color_palette("Greens")[-1]
-        elif benchmark_name.startswith("zarr"):
-            download_color = sns.color_palette("Reds")[-1]
-        else:
-            download_color = sns.color_palette("Blues")[-1]
+        download_color = self._download_color(benchmark_name.split(" ")[0])
         ax.plot(x_range, y_local, color=download_color, linestyle="dashed", linewidth=2)
         ax.plot(intersection_x, intersection_y, "x", color=color, markersize=8, zorder=5)
         ax.set(title=title, xlabel=xlabel, ylabel=ylabel)
 
         return ax
+
+    @staticmethod
+    def _download_color(format_family: str) -> Any:
+        """Return the color used for download + local read curves of a file format."""
+        palette_name = {"hdf5": "Greens", "zarr": "Reds"}.get(format_family, "Blues")
+        download_color = sns.color_palette(palette_name)[-1]
+        return download_color
 
     def plot_download_vs_stream_benchmarks(
         self,
@@ -2025,7 +2031,8 @@ class BenchmarkVisualizer:
             return
 
         # Get unique modalities and row values for subplot layout
-        modalities = sorted(collected_download.select("modality").unique().to_series().to_list())
+        present_modalities = set(collected_download.select("modality").unique().to_series().to_list())
+        modalities = [modality for modality in MODALITY_ORDER if modality in present_modalities]
         row_values = sorted(collected_download.select(row).unique().to_series().to_list()) if row else [None]
         benchmarks = sorted(collected_stream.select(group).unique().to_series().to_list())
 
@@ -2065,7 +2072,20 @@ class BenchmarkVisualizer:
                     title=f"is_preloaded={is_preloaded} | modality = {modality}",
                 )
 
-        axes[0, 0].legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=8)
+        handles_by_label = {}
+        for ax in axes.flat:
+            for handle, label in zip(*ax.get_legend_handles_labels()):
+                handles_by_label.setdefault(label, handle)
+        label_order = self._display_method_labels(self.pynwb_read_order)
+        ordered_labels = [label for label in label_order if label in handles_by_label]
+        ordered_labels += [label for label in handles_by_label if label not in ordered_labels]
+        axes[0, 0].legend(
+            [handles_by_label[label] for label in ordered_labels],
+            ordered_labels,
+            bbox_to_anchor=(1.05, 1),
+            loc="upper left",
+            fontsize=8,
+        )
 
         # Add figure caption
         caption = self._add_environment_caption(caption)
@@ -2074,6 +2094,191 @@ class BenchmarkVisualizer:
         sns.despine()
         plt.tight_layout()
         plt.savefig(filename, dpi=300, bbox_inches="tight")
+        plt.close()
+
+    @staticmethod
+    def _first_crossover_index(*, stream_times: np.ndarray, download_times: np.ndarray) -> Optional[int]:
+        """Return the first slice index at which streaming takes longer than download + local read, if any."""
+        n_shared = min(len(stream_times), len(download_times))
+        stream_exceeds_download = np.asarray(stream_times[:n_shared]) > np.asarray(download_times[:n_shared])
+        if not stream_exceeds_download.any():
+            return None
+        crossover_index = int(np.argmax(stream_exceeds_download))
+        return crossover_index
+
+    def _write_incremental_crossover_table(self, summary_df: pd.DataFrame, filename: str) -> None:
+        """Write one row per modality and streaming method comparing measured streaming against download + local."""
+        if self.summary_tables_directory is None:
+            return
+
+        rows = []
+        for (modality, method), stream_group in summary_df[summary_df["access_mode"] == "remote"].groupby(
+            ["modality", "benchmark_name_clean"]
+        ):
+            stream_group = stream_group.sort_values("slice_index")
+            format_family = stream_group["format_family"].iloc[0]
+            download_group = summary_df[
+                (summary_df["access_mode"] == "local")
+                & (summary_df["modality"] == modality)
+                & (summary_df["format_family"] == format_family)
+            ].sort_values("slice_index")
+            n_slices = int(stream_group["slice_index"].max())
+            crossover_index = (
+                self._first_crossover_index(
+                    stream_times=stream_group["median"].to_numpy(), download_times=download_group["median"].to_numpy()
+                )
+                if not download_group.empty
+                else None
+            )
+            rows.append(
+                {
+                    "modality": modality,
+                    "benchmark_name_clean": method,
+                    "n_runs": int(stream_group["n"].min()),
+                    "n_slices": n_slices,
+                    "stream_download_time": stream_group["avg_download_time"].iloc[0],
+                    "stream_open_time": stream_group["median"].iloc[0],
+                    "stream_total_time": stream_group["median"].iloc[-1],
+                    "download_format": format_family,
+                    "download_time": download_group["avg_download_time"].iloc[0] if not download_group.empty else None,
+                    "download_and_local_total_time": (
+                        download_group["median"].iloc[-1] if not download_group.empty else None
+                    ),
+                    "crossover_slice_index": crossover_index,
+                    "crossover_fraction_read": None if crossover_index is None else crossover_index / n_slices,
+                }
+            )
+
+        if not rows:
+            self._record_skipped_output("summary table", filename, "No streaming data available for summary table.")
+            return
+        pd.DataFrame(rows).to_csv(self.summary_tables_directory / filename, index=False)
+
+    def plot_incremental_slicing_benchmarks(self, db: BenchmarkDatabase) -> None:
+        """Plot measured cumulative streaming times against measured download + local read times."""
+        print("Plotting incremental slicing benchmarks...")
+        figure_filename = self.output_directory / self._filename_with_environment_postfix(
+            "incremental_slicing_cumulative_time"
+        )
+
+        incremental_pdf = db.combine_incremental_slicing_and_download_times().collect().to_pandas()
+        if incremental_pdf.empty:
+            self._record_skipped_output("plot", figure_filename, "No incremental slicing data available to plot.")
+            return
+
+        group_cols = ["modality", "access_mode", "format_family", "benchmark_name_clean", "slice_index"]
+        summary_df = (
+            incremental_pdf.groupby(group_cols)
+            .agg(
+                n=("total_time", "count"),
+                median=("total_time", "median"),
+                min=("total_time", "min"),
+                max=("total_time", "max"),
+                avg_download_time=("avg_download_time", "mean"),
+            )
+            .reset_index()
+        )
+        self._write_summary_table(
+            df=incremental_pdf,
+            group_cols=group_cols,
+            value_col="total_time",
+            filename=f"{figure_filename.stem}_summary.csv",
+        )
+        self._write_incremental_crossover_table(
+            summary_df=summary_df,
+            filename=self._filename_with_environment_postfix("incremental_slicing_crossover", extension=".csv"),
+        )
+
+        present_methods = set(summary_df.loc[summary_df["access_mode"] == "remote", "benchmark_name_clean"])
+        stream_order = [method for method in self.pynwb_read_order if method in present_methods]
+        stream_order += sorted(present_methods - set(stream_order))
+        method_colors = self._method_palette(stream_order)
+        modalities = [modality for modality in MODALITY_ORDER if modality in set(summary_df["modality"])]
+
+        fig, axes = plt.subplots(nrows=2, ncols=len(modalities), figsize=(5 * len(modalities), 8), squeeze=False)
+        for col_idx, modality in enumerate(modalities):
+            modality_df = summary_df[summary_df["modality"] == modality]
+            curves = []
+            for format_family, download_group in modality_df[modality_df["access_mode"] == "local"].groupby(
+                "format_family"
+            ):
+                curves.append(
+                    (
+                        download_group.sort_values("slice_index"),
+                        f"{FORMAT_FAMILY_LABELS.get(format_family, format_family)} download + local",
+                        self._download_color(format_family),
+                        "dashed",
+                    )
+                )
+            download_curves = {group["format_family"].iloc[0]: group for group, *_ in curves}
+            for method in stream_order:
+                stream_group = modality_df[modality_df["benchmark_name_clean"] == method].sort_values("slice_index")
+                if not stream_group.empty:
+                    curves.append(
+                        (
+                            stream_group,
+                            self._display_method_label(method),
+                            method_colors[method],
+                            self._method_linestyle(method),
+                        )
+                    )
+
+            for row_idx in range(2):
+                ax = axes[row_idx, col_idx]
+                for curve_df, label, color, linestyle in curves:
+                    ax.plot(curve_df["slice_index"], curve_df["median"], color=color, linestyle=linestyle, label=label)
+                    if (curve_df["n"] > 1).any():
+                        ax.fill_between(
+                            curve_df["slice_index"], curve_df["min"], curve_df["max"], color=color, alpha=0.2
+                        )
+                    if curve_df["access_mode"].iloc[0] != "remote":
+                        continue
+                    download_df = download_curves.get(curve_df["format_family"].iloc[0])
+                    if download_df is None:
+                        continue
+                    crossover_index = self._first_crossover_index(
+                        stream_times=curve_df["median"].to_numpy(), download_times=download_df["median"].to_numpy()
+                    )
+                    if crossover_index is not None:
+                        ax.plot(
+                            crossover_index,
+                            curve_df["median"].iloc[crossover_index],
+                            "x",
+                            color=color,
+                            markersize=8,
+                            zorder=5,
+                        )
+
+                xlabel = "Number of TimeSeries read" if modality == "Icephys" else "Number of slices read"
+                ax.set(xlabel=xlabel, title=modality)
+                if row_idx == 1:
+                    ax.set_yscale("log")
+                if col_idx == 0:
+                    ax.set_ylabel("Cumulative time (s)" if row_idx == 0 else "Cumulative time (s, log scale)")
+
+        handles_by_label = {}
+        for ax in axes.flat:
+            for handle, label in zip(*ax.get_legend_handles_labels()):
+                handles_by_label.setdefault(label, handle)
+        fig.legend(
+            handles_by_label.values(), handles_by_label.keys(), bbox_to_anchor=(1.0, 0.5), loc="center left", fontsize=8
+        )
+
+        caption = self._add_environment_caption(
+            "Measured cumulative time to open a file and read an array slice by slice along the time axis "
+            "(Icephys: one TimeSeries at a time) until the full array has been read. "
+            "Solid lines show streaming with PyNWB, where the first point is the file open time. "
+            "The LINDI curves include the download of the LINDI JSON reference file. "
+            "Dashed lines show the mean full-file download time plus local open and read times. "
+            "X markers indicate the first slice at which streaming becomes slower than downloading. "
+            "The top row uses a linear and the bottom row a logarithmic time axis. "
+            "Lines show the median and shaded bands the range across runs, if more than one run is available. "
+        )
+        fig.text(0.5, -0.01, caption, ha="center", va="top", fontsize=9, wrap=True, style="italic")
+
+        sns.despine()
+        plt.tight_layout()
+        plt.savefig(figure_filename, dpi=300, bbox_inches="tight")
         plt.close()
 
     def plot_method_rankings(self, db: BenchmarkDatabase):
@@ -2352,6 +2557,8 @@ class BenchmarkVisualizer:
         # baseline download line + time to open + slice locally vs. number of slices
         # time to open + slice locally vs. number of slices
         self.plot_download_vs_stream_benchmarks(db)
+        # measured cumulative open + slice-by-slice reads of the full array, streaming vs. download + local
+        self.plot_incremental_slicing_benchmarks(db)
 
     def plot_all(self, db: BenchmarkDatabase, environment_timepoints: Optional[Dict[str, str]] = None):
         """Generate all benchmark visualization plots."""

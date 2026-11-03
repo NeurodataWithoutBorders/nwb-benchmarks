@@ -100,6 +100,7 @@ class BenchmarkDatabase:
             name.replace("ContinuousSliceBenchmark", "")
             .replace("FileReadBenchmark", "")
             .replace("DownloadBenchmark", "")
+            .replace("IncrementalSliceBenchmark", "")
         )
         return self.split_camel_case(short_name).lower()
 
@@ -151,7 +152,9 @@ class BenchmarkDatabase:
             .with_columns(
                 [
                     pl.col("benchmark_name_test")
-                    .str.extract(r"(ContinuousSliceBenchmark|FileReadBenchmark|DownloadBenchmark)")
+                    .str.extract(
+                        r"(IncrementalSliceBenchmark|ContinuousSliceBenchmark|FileReadBenchmark|DownloadBenchmark)"
+                    )
                     .alias("benchmark_name_label"),
                     pl.col("benchmark_name_test")
                     .map_elements(self.clean_benchmark_name_test, return_dtype=pl.String)
@@ -367,4 +370,57 @@ class BenchmarkDatabase:
                     pl.col("format_family").alias("benchmark_name_clean"),
                 ]
             )
+        )
+
+    def get_incremental_slicing_results(self) -> pl.LazyFrame:
+        """Get cumulative open + incremental slice times, with one row per run and slice index."""
+        return (
+            self.filter_tests("track_incremental_slicing")
+            .filter(pl.col("variable") == "cumulative_time_in_seconds")
+            .with_columns(
+                [
+                    pl.when(pl.col("benchmark_name").str.contains("LocalIncrementalSliceBenchmark"))
+                    .then(pl.lit("local"))
+                    .otherwise(pl.lit("remote"))
+                    .alias("access_mode"),
+                    pl.col("benchmark_name_clean").str.replace("hdf5 pynwb lindi", "lindi pynwb"),
+                    pl.col("value_index").alias("slice_index"),
+                ]
+            )
+            .with_columns(
+                pl.when(pl.col("benchmark_name_clean").str.starts_with("zarr"))
+                .then(pl.lit("zarr"))
+                .otherwise(pl.lit("hdf5"))
+                .alias("format_family")
+            )
+        )
+
+    def combine_incremental_slicing_and_download_times(self) -> pl.LazyFrame:
+        """Combine incremental slicing times with the download times needed before the first read.
+
+        Local benchmarks read an already-downloaded file, so the mean download time of the full file is added. LINDI
+        downloads its JSON reference file outside the timed region, so the mean LINDI JSON download time is added.
+        Other streaming methods need no download, and their first entry already includes the file open time.
+        """
+        download_df = (
+            self.filter_tests("time_download")
+            .with_columns(pl.col("benchmark_name_clean").str.replace("dandi api", "pynwb").alias("download_match_name"))
+            .group_by(["modality", "download_match_name"])
+            .agg(pl.col("value").mean().alias("avg_download_time"))
+        )
+        incremental_df = self.get_incremental_slicing_results().with_columns(
+            pl.when(pl.col("access_mode") == "local")
+            .then(pl.col("benchmark_name_clean"))
+            .when(pl.col("benchmark_name_clean") == "lindi pynwb")
+            .then(pl.lit("lindi pynwb"))
+            .otherwise(pl.lit(None, dtype=pl.String))
+            .alias("download_match_name")
+        )
+
+        return (
+            incremental_df.join(download_df, on=["modality", "download_match_name"], how="left")
+            # Local results without a matching download cannot be compared fairly with streaming.
+            .filter(pl.col("download_match_name").is_null() | pl.col("avg_download_time").is_not_null())
+            .with_columns(pl.col("avg_download_time").fill_null(0.0))
+            .with_columns((pl.col("value") + pl.col("avg_download_time")).alias("total_time"))
         )
