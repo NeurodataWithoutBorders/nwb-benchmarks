@@ -92,3 +92,39 @@ def test_first_crossover_index(stream_times, download_times, expected):
     )
 
     assert crossover_index == expected
+
+
+def test_summary_tables_have_one_column_per_curve_and_one_overview_row_per_curve(tmp_path):
+    pd = pytest.importorskip("pandas")
+    tables_directory = tmp_path / "tables"
+    visualizer = BenchmarkVisualizer(output_directory=tmp_path / "figures", summary_tables_directory=tables_directory)
+
+    visualizer.plot_incremental_slicing_benchmarks(make_database(tmp_path))
+
+    curve_table = pd.read_csv(tables_directory / "incremental_slicing_cumulative_time_ecephys.csv")
+    expected_curves = [
+        "HDF5 download + local",
+        "Zarr download + local",
+        "HDF5 remfile cache",
+        "HDF5 fsspec HTTPS cache",
+        "HDF5 ROS3",
+        "LINDI",
+        "Zarr",
+    ]
+    assert curve_table.columns.to_list() == [
+        "slice_index",
+        "fraction_of_time_axis_read",
+        *[f"{curve} (s)" for curve in expected_curves],
+    ]
+    assert curve_table["slice_index"].to_list() == [0, 1, 2]
+
+    overview = pd.read_csv(tables_directory / "incremental_slicing_overview.csv").set_index("method")
+    assert overview.index.to_list() == expected_curves
+    for curve in expected_curves:
+        assert overview.loc[curve, "total_time_s"] == curve_table[f"{curve} (s)"].iloc[-1]
+    assert overview.loc["LINDI", "open_time_s"] == 1.0
+    assert overview.loc["LINDI", "download_time_s"] == 3.0
+    assert overview.loc["HDF5 remfile cache", "mean_time_per_slice_s"] == 1.0
+    assert pd.isna(overview.loc["HDF5 remfile cache", "crossover_slice_index"])
+    assert pd.isna(overview.loc["HDF5 download + local", "crossover_slice_index"])
+    assert not (tables_directory / "incremental_slicing_cumulative_time_summary.csv").exists()

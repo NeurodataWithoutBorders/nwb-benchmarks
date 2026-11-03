@@ -2106,56 +2106,121 @@ class BenchmarkVisualizer:
         crossover_index = int(np.argmax(stream_exceeds_download))
         return crossover_index
 
-    def _write_incremental_crossover_table(self, summary_df: pd.DataFrame, filename: str) -> None:
-        """Write one row per modality and streaming method comparing measured streaming against download + local."""
+    def _incremental_slicing_curves(
+        self, *, modality_df: pd.DataFrame, stream_order: List[str], method_colors: Dict[str, Any]
+    ) -> List[tuple]:
+        """Return ``(curve_df, label, color, linestyle)`` per plotted curve, download + local first, in legend order."""
+        curves = []
+        for format_family, download_group in modality_df[modality_df["access_mode"] == "local"].groupby(
+            "format_family"
+        ):
+            curves.append(
+                (
+                    download_group.sort_values("slice_index"),
+                    f"{FORMAT_FAMILY_LABELS.get(format_family, format_family)} download + local",
+                    self._download_color(format_family),
+                    "dashed",
+                )
+            )
+        for method in stream_order:
+            stream_group = modality_df[modality_df["benchmark_name_clean"] == method].sort_values("slice_index")
+            if not stream_group.empty:
+                curves.append(
+                    (
+                        stream_group,
+                        self._display_method_label(method),
+                        method_colors[method],
+                        self._method_linestyle(method),
+                    )
+                )
+        return curves
+
+    def _write_incremental_curve_tables(self, curves_by_modality: Dict[str, List[tuple]]) -> None:
+        """Write one wide table per modality with one row per slice index and one column per plotted curve."""
+        if self.summary_tables_directory is None:
+            return
+
+        for modality, curves in curves_by_modality.items():
+            filename = self._filename_with_environment_postfix(
+                f"incremental_slicing_cumulative_time_{modality.lower()}", extension=".csv"
+            )
+            if not curves:
+                self._record_skipped_output("summary table", filename, "No data available for summary table.")
+                continue
+
+            columns = {}
+            for curve_df, label, *_ in curves:
+                curve_df = curve_df.set_index("slice_index")
+                columns[f"{label} (s)"] = curve_df["median"]
+                if (curve_df["n"] > 1).any():
+                    columns[f"{label} min (s)"] = curve_df["min"]
+                    columns[f"{label} max (s)"] = curve_df["max"]
+            curve_table = pd.DataFrame(columns).round(3)
+            curve_table.index.name = "slice_index"
+            curve_table.insert(0, "fraction_of_time_axis_read", (curve_table.index / curve_table.index.max()).round(6))
+            curve_table.to_csv(self.summary_tables_directory / filename)
+
+    def _write_incremental_overview_table(self, curves_by_modality: Dict[str, List[tuple]], filename: str) -> None:
+        """Write one row per modality and plotted curve with its metadata, headline times, and crossover."""
         if self.summary_tables_directory is None:
             return
 
         rows = []
-        for (modality, method), stream_group in summary_df[summary_df["access_mode"] == "remote"].groupby(
-            ["modality", "benchmark_name_clean"]
-        ):
-            stream_group = stream_group.sort_values("slice_index")
-            format_family = stream_group["format_family"].iloc[0]
-            download_group = summary_df[
-                (summary_df["access_mode"] == "local")
-                & (summary_df["modality"] == modality)
-                & (summary_df["format_family"] == format_family)
-            ].sort_values("slice_index")
-            n_slices = int(stream_group["slice_index"].max())
-            crossover_index = (
-                self._first_crossover_index(
-                    stream_times=stream_group["median"].to_numpy(), download_times=download_group["median"].to_numpy()
-                )
-                if not download_group.empty
-                else None
-            )
-            rows.append(
-                {
+        for modality, curves in curves_by_modality.items():
+            download_curves = {
+                curve_df["format_family"].iloc[0]: curve_df
+                for curve_df, *_ in curves
+                if curve_df["access_mode"].iloc[0] == "local"
+            }
+            for curve_df, label, *_ in curves:
+                access_mode = curve_df["access_mode"].iloc[0]
+                format_family = curve_df["format_family"].iloc[0]
+                n_runs = int(curve_df["n"].min())
+                n_slices = int(curve_df["slice_index"].max())
+                total_times = curve_df["median"].to_numpy()
+                row = {
                     "modality": modality,
-                    "benchmark_name_clean": method,
-                    "n_runs": int(stream_group["n"].min()),
+                    "method": label,
+                    "benchmark_name_clean": curve_df["benchmark_name_clean"].iloc[0],
+                    "access_mode": access_mode,
+                    "format": format_family,
+                    "n_runs": n_runs,
                     "n_slices": n_slices,
-                    "stream_download_time": stream_group["avg_download_time"].iloc[0],
-                    # median of the measured value alone, so LINDI's JSON download is not counted as open time
-                    "stream_open_time": stream_group["median_value"].iloc[0],
-                    "stream_total_time": stream_group["median"].iloc[-1],
-                    "download_format": format_family,
-                    "download_time": download_group["avg_download_time"].iloc[0] if not download_group.empty else None,
-                    "download_and_local_total_time": (
-                        download_group["median"].iloc[-1] if not download_group.empty else None
+                    "download_time_s": curve_df["avg_download_time"].iloc[0],
+                    # median of the measured value alone, so no download time is counted as open time
+                    "open_time_s": curve_df["median_value"].iloc[0],
+                    # starts after the first slice, which also carries one-time dataset access costs
+                    "mean_time_per_slice_s": (
+                        (total_times[-1] - total_times[1]) / (n_slices - 1) if n_slices > 1 else np.nan
                     ),
-                    "crossover_slice_index": crossover_index,
-                    "crossover_fraction_of_slices_read": (
-                        None if crossover_index is None else crossover_index / n_slices
-                    ),
+                    "total_time_s": total_times[-1],
+                    "total_time_min_s": curve_df["min"].iloc[-1] if n_runs > 1 else np.nan,
+                    "total_time_max_s": curve_df["max"].iloc[-1] if n_runs > 1 else np.nan,
+                    "total_time_std_s": curve_df["std"].iloc[-1] if n_runs > 1 else np.nan,
+                    "crossover_slice_index": None,
+                    "crossover_fraction_of_slices_read": None,
                 }
-            )
+                download_df = download_curves.get(format_family)
+                if access_mode == "remote" and download_df is not None:
+                    crossover_index = self._first_crossover_index(
+                        stream_times=total_times, download_times=download_df["median"].to_numpy()
+                    )
+                    if crossover_index is not None:
+                        row["crossover_slice_index"] = crossover_index
+                        row["crossover_fraction_of_slices_read"] = crossover_index / n_slices
+                rows.append(row)
 
         if not rows:
-            self._record_skipped_output("summary table", filename, "No streaming data available for summary table.")
+            self._record_skipped_output("summary table", filename, "No data available for summary table.")
             return
-        pd.DataFrame(rows).to_csv(self.summary_tables_directory / filename, index=False)
+        overview = pd.DataFrame(rows)
+        time_columns = [column for column in overview.columns if column.endswith("_s")]
+        overview[time_columns] = overview[time_columns].astype(float).round(3)
+        overview["crossover_slice_index"] = overview["crossover_slice_index"].astype("Int64")
+        overview["crossover_fraction_of_slices_read"] = (
+            overview["crossover_fraction_of_slices_read"].astype(float).round(4)
+        )
+        overview.to_csv(self.summary_tables_directory / filename, index=False)
 
     def plot_incremental_slicing_benchmarks(self, db: BenchmarkDatabase) -> None:
         """Plot measured cumulative streaming times against measured download + local read times."""
@@ -2178,19 +2243,10 @@ class BenchmarkVisualizer:
                 median_value=("value", "median"),
                 min=("total_time", "min"),
                 max=("total_time", "max"),
+                std=("total_time", "std"),
                 avg_download_time=("avg_download_time", "mean"),
             )
             .reset_index()
-        )
-        self._write_summary_table(
-            df=incremental_pdf,
-            group_cols=group_cols,
-            value_col="total_time",
-            filename=f"{figure_filename.stem}_summary.csv",
-        )
-        self._write_incremental_crossover_table(
-            summary_df=summary_df,
-            filename=self._filename_with_environment_postfix("incremental_slicing_crossover", extension=".csv"),
         )
 
         present_methods = set(summary_df.loc[summary_df["access_mode"] == "remote", "benchmark_name_clean"])
@@ -2198,34 +2254,29 @@ class BenchmarkVisualizer:
         stream_order += sorted(present_methods - set(stream_order))
         method_colors = self._method_palette(stream_order)
         modalities = [modality for modality in MODALITY_ORDER if modality in set(summary_df["modality"])]
+        curves_by_modality = {
+            modality: self._incremental_slicing_curves(
+                modality_df=summary_df[summary_df["modality"] == modality],
+                stream_order=stream_order,
+                method_colors=method_colors,
+            )
+            for modality in modalities
+        }
+
+        self._write_incremental_curve_tables(curves_by_modality)
+        self._write_incremental_overview_table(
+            curves_by_modality,
+            filename=self._filename_with_environment_postfix("incremental_slicing_overview", extension=".csv"),
+        )
 
         fig, axes = plt.subplots(nrows=2, ncols=len(modalities), figsize=(5 * len(modalities), 8), squeeze=False)
         for col_idx, modality in enumerate(modalities):
-            modality_df = summary_df[summary_df["modality"] == modality]
-            curves = []
-            for format_family, download_group in modality_df[modality_df["access_mode"] == "local"].groupby(
-                "format_family"
-            ):
-                curves.append(
-                    (
-                        download_group.sort_values("slice_index"),
-                        f"{FORMAT_FAMILY_LABELS.get(format_family, format_family)} download + local",
-                        self._download_color(format_family),
-                        "dashed",
-                    )
-                )
-            download_curves = {group["format_family"].iloc[0]: group for group, *_ in curves}
-            for method in stream_order:
-                stream_group = modality_df[modality_df["benchmark_name_clean"] == method].sort_values("slice_index")
-                if not stream_group.empty:
-                    curves.append(
-                        (
-                            stream_group,
-                            self._display_method_label(method),
-                            method_colors[method],
-                            self._method_linestyle(method),
-                        )
-                    )
+            curves = curves_by_modality[modality]
+            download_curves = {
+                curve_df["format_family"].iloc[0]: curve_df
+                for curve_df, *_ in curves
+                if curve_df["access_mode"].iloc[0] == "local"
+            }
 
             for row_idx in range(2):
                 ax = axes[row_idx, col_idx]
