@@ -164,3 +164,43 @@ def test_checksum_is_stable(fake_distributions, conda_prefix, monkeypatch):
 
     changed["python_distributions"][0]["version"] = "2.0"
     assert get_dictionary_checksum(stable_environment_content(changed)) != checksum
+
+
+def test_reduced_content_keeps_legacy_structure_and_adds_runtime(fake_distributions, conda_prefix, monkeypatch):
+    monkeypatch.setattr(_environment.shutil, "which", lambda name: "/bin/conda")
+    monkeypatch.setattr(_environment.subprocess, "run", fake_run())
+    captured = capture_environment()
+
+    content = stable_environment_content(captured)
+
+    assert set(content) == {captured["interpreter"]["version"], "runtime"}
+    assert [package["name"] for package in content[captured["interpreter"]["version"]]] == ["hdf5", "python"]
+    assert content["runtime"]["conda_available"] is True
+    assert [d["name"] for d in content["runtime"]["python_distributions"]] == ["numpy", "pynwb"]
+
+
+def test_environment_reader_handles_legacy_and_extended_files(tmp_path):
+    from nwb_benchmarks.database._models import Environment
+
+    legacy = tmp_path / "environment-legacy.json"
+    legacy.write_text(json.dumps({"3.11.9": [{"name": "hdf5", "version": "1.14", "build": "b", "channel": "c"}]}))
+    extended = tmp_path / "environment-extended.json"
+    extended.write_text(
+        json.dumps(
+            {
+                "3.11.9": [{"name": "hdf5", "version": "1.14", "build": "b", "channel": "c"}],
+                "runtime": dict(
+                    conda_available=True,
+                    python_distributions=[{"name": "pynwb", "version": "3.1.0"}],
+                    runtime_versions={"h5py": "3.11"},
+                ),
+            }
+        )
+    )
+
+    assert vars(Environment.safe_load_from_json(legacy)) == dict(
+        environment_id="legacy", preamble="3.11.9", hdf5="1.14 (b)"
+    )
+    assert vars(Environment.safe_load_from_json(extended)) == dict(
+        environment_id="extended", preamble="3.11.9", hdf5="1.14 (b)", pynwb="3.1.0", runtime_h5py="3.11"
+    )

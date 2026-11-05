@@ -202,26 +202,20 @@ class Environment:
             data = json.load(fp=file_stream)
 
         environment_id = file_path.stem.removeprefix("environment-")
-        if "python_distributions" in data:  # Environment files from database version 5.0.0 onward
-            preamble = data["python_version"]
-            packages = {distribution["name"]: distribution["version"] for distribution in data["python_distributions"]}
-            packages.update(
-                {
-                    package["name"]: f'{package["version"]} ({package["build"]})'
-                    for package in data["conda_packages"] or []
-                }
-            )
-            packages.update({f"runtime_{name}": version for name, version in data["runtime_versions"].items()})
-        else:  # Legacy `conda list` text parsed into a single preamble key
-            if len(data) > 1:
-                return None
+        runtime = data.get("runtime", {})  # Added to the legacy structure in database version 5.0.0
+        legacy_keys = [key for key in data if key != "runtime"]
+        if len(legacy_keys) != 1:
+            return None
 
-            preamble = next(iter(data.keys()))
-            packages = {
-                package["name"]: f'{package["version"]} ({package["build"]})'
-                for package in data[preamble]
-                if len(package) >= 3
-            }
+        preamble = legacy_keys[0]
+        packages = {
+            package["name"]: f'{package["version"]} ({package["build"]})'
+            for package in data[preamble]
+            if len(package) >= 3
+        }
+        for distribution in runtime.get("python_distributions", []):
+            packages.setdefault(distribution["name"], distribution["version"])
+        packages.update({f"runtime_{name}": version for name, version in runtime.get("runtime_versions", {}).items()})
 
         if not any(packages):
             return None

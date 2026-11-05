@@ -148,30 +148,38 @@ def capture_environment() -> Dict[str, Any]:
     )
 
 
+RUNTIME_FIELD = "runtime"
+
+
 def stable_environment_content(raw_environment: Dict[str, Any]) -> Dict[str, Any]:
     """
     Reduce a raw capture to the content that identifies the environment.
 
-    Only sorted package/version content is kept; absolute paths, executables, diagnostics and warnings are dropped so
-    that the same environment on two checkouts produces the same ID.
+    The legacy structure is kept: a single key holding the Python version string, mapped to the sorted list of
+    `name`/`version`/`build`/`channel` package records (the conda packages, or the `importlib.metadata` distributions
+    when conda is unavailable). The additional capture is nested under the `runtime` key. Absolute paths, executables,
+    diagnostics and warnings are dropped so that the same environment on two checkouts produces the same ID.
     """
     conda = raw_environment.get("conda")
-    return dict(
-        python_version=raw_environment["interpreter"]["version"],
-        python_distributions=sorted(
-            ({"name": d["name"], "version": d["version"]} for d in raw_environment["python_distributions"]),
-            key=lambda d: (d["name"], d["version"]),
-        ),
-        conda_packages=(
-            None
-            if conda is None
-            else sorted(
-                (
-                    {key: package.get(key, "") for key in ("name", "version", "build", "channel")}
-                    for package in conda["packages"]
-                ),
-                key=lambda p: tuple(p.values()),
-            )
-        ),
-        runtime_versions=dict(sorted(raw_environment["runtime_versions"].items())),
+    python_distributions = sorted(
+        ({"name": d["name"], "version": d["version"]} for d in raw_environment["python_distributions"]),
+        key=lambda d: (d["name"], d["version"]),
     )
+    if conda is None:
+        packages = [dict(name=d["name"], version=d["version"], build="", channel="pypi") for d in python_distributions]
+    else:
+        packages = sorted(
+            (
+                {key: package.get(key, "") for key in ("name", "version", "build", "channel")}
+                for package in conda["packages"]
+            ),
+            key=lambda p: tuple(p.values()),
+        )
+    return {
+        raw_environment["interpreter"]["version"]: packages,
+        RUNTIME_FIELD: dict(
+            conda_available=conda is not None,
+            python_distributions=python_distributions,
+            runtime_versions=dict(sorted(raw_environment["runtime_versions"].items())),
+        ),
+    }

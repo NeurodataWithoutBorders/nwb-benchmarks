@@ -21,7 +21,7 @@ def _parse_environment_info(raw_environment_info: dict) -> dict:
     environment_info = stable_environment_content(raw_environment=raw_environment_info)
 
     # Second line of defence; `capture_environment` already refuses to start the run without `pynwb`
-    if "pynwb" not in {distribution["name"] for distribution in environment_info["python_distributions"]}:
+    if "pynwb" not in {distribution["name"] for distribution in environment_info["runtime"]["python_distributions"]}:
         interpreter = raw_environment_info["interpreter"]
         warnings.warn(
             "`pynwb` is missing from the recorded environment, so it was likely captured from the wrong interpreter "

@@ -271,9 +271,12 @@ if a ``conda``, ``mamba`` or ``micromamba`` executable is found), and the versio
 ``h5py``, HDF5, ``zarr``, ``numcodecs``, OpenSSL and the other I/O libraries. The run stops before the benchmarks start if
 ``pynwb`` is not installed in that interpreter. The raw capture, including diagnostics such as paths and capture
 warnings, is kept in ``.asv/.raw_environment_info.json``. The ``environments/`` file only keeps the sorted package and
-version content, with keys ``python_version``, ``python_distributions``, ``conda_packages`` (``null`` if conda was
-unavailable) and ``runtime_versions``. The environment ID is the checksum of that content, so it does not depend on
-paths or on the order of the packages.
+version content, in the original structure: one key holding the Python version string, mapped to the list of
+``name``/``version``/``build``/``channel`` records (the conda packages, or the installed distributions with channel
+``pypi`` if conda was unavailable). The remaining capture is added under an additional ``runtime`` key, with
+``conda_available``, ``python_distributions`` and ``runtime_versions``, so files written before this field existed are
+still read. The environment ID is the checksum of that content, so it does not depend on paths or on the order of the
+packages.
 
 Results from all contributors are collected in the central
 `nwb-benchmarks-results <https://github.com/NeurodataWithoutBorders/nwb-benchmarks-results>`_ repository, which
