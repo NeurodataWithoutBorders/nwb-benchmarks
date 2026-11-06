@@ -23,9 +23,13 @@ PACKAGES_OF_INTEREST = [
 
 # The LBL Mac (official benchmark machine) received a new machine ID when the benchmark environment moved to
 # Python 3.13, because ASV's machine name and platform string changed. The hardware is identical.
+# It received a third machine ID for the 2026-11-03 incremental slicing run because psutil's total_swap_memory changed
+# from 0 to 1 GiB. macOS allocates swap dynamically, so this value is not a stable hardware property. All other
+# machine info, including CPU, RAM, and OS version, is identical.
 LBL_MAC_MACHINE_IDS = [
     "87fee773e425b4b1d3978fbf762d57effb0e8df8",
     "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+    "16b244cd5a970ac0d7fefcb46c6ab0476075e5b5",
 ]
 
 ENVIRONMENT_TIMEPOINTS = {
@@ -34,6 +38,84 @@ ENVIRONMENT_TIMEPOINTS = {
     "2025-09-01": "052cb4d925793bbbc270d9384a60bc24023025b7",  # note - this environment was created after 2025-09-01 but exact date unknown
     "2026-10-07": "42bfe7119727f6ab276361065e27b6e5fa5bbdc9",  # Python 3.13 environment, first run on 2026-10-07
 }
+
+# Individual benchmark samples flagged for removal during review of the raw results.
+# A sample is one benchmark test case within one results file, identified by the machine ID and timestamp from the
+# results filename plus the benchmark and parameter case names. All variables recorded for the sample are dropped,
+# while the remaining benchmarks of the same run are kept. The parquet `uuid` is per row, so it cannot identify a sample.
+EXCLUDED_SAMPLES = [
+    # Transient network stall. total_transfer_time_in_seconds was 138.0 s (network_total_time_in_seconds 138.2 s),
+    # whereas the other five runs of this case in the same environment took 7.8-10.2 s. The transferred bytes and
+    # packet counts match the other runs, so the slowdown reflects the network rather than the access method.
+    # Keeping it inflated the mean to 30.5 +/- 52.7 s.
+    {
+        "machine_id": "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+        "timestamp": "2026-10-18-13-02-38",
+        "benchmark_name": (
+            "network_tracking_remote_slicing."
+            "HDF5PyNWBFsspecHttpsPreloadedNoCacheContinuousSliceBenchmark.track_network_during_slice"
+        ),
+        "parameter_case_name": "OphysTestCase4",
+    },
+    # Failed packet capture. All packet, byte, and transfer-time metrics are 0 and mean_time_per_web_packet is NaN,
+    # which is impossible for an uncached remote HTTPS read. The 2026-11-01 repeat with the same commit, environment,
+    # and machine recorded 11,108,017 transferred bytes, consistent with the 10.3-11.2 MB of earlier runs.
+    # See https://github.com/NeurodataWithoutBorders/nwb-benchmarks-results/pull/11#discussion_r4448487419
+    {
+        "machine_id": "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+        "timestamp": "2026-10-30-23-20-18",
+        "benchmark_name": (
+            "network_tracking_remote_file_reading."
+            "HDF5H5pyFileReadBenchmark.track_network_read_hdf5_h5py_fsspec_https_no_cache"
+        ),
+        "parameter_case_name": "EcephysTestCase",
+    },
+    # The following remote file-open timing samples are isolated network stalls. Each is at least 5x the median of
+    # its benchmark and test case. The runs they belong to are otherwise normal (the median benchmark of each run is
+    # within 10% of its usual time), so only the affected sample is dropped. A smaller slowdown (about 3x) is kept as
+    # plausible network variance.
+    # Icephys file open took 76.2 s, whereas the other five runs took 3.2-4.5 s.
+    {
+        "machine_id": "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+        "timestamp": "2026-10-16-17-01-16",
+        "benchmark_name": ("time_remote_file_reading.HDF5H5pyFileReadBenchmark.time_read_hdf5_h5py_fsspec_s3_no_cache"),
+        "parameter_case_name": "IcephysTestCase",
+    },
+    # Ophys file open took 22.3 s, whereas the other five runs took 2.9-4.2 s.
+    {
+        "machine_id": "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+        "timestamp": "2026-10-13-14-34-49",
+        "benchmark_name": ("time_remote_file_reading.HDF5H5pyFileReadBenchmark.time_read_hdf5_h5py_fsspec_s3_no_cache"),
+        "parameter_case_name": "OphysTestCase",
+    },
+    # Ophys file open took 278.6 s, whereas the other five runs took 45.1-57.1 s.
+    {
+        "machine_id": "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+        "timestamp": "2026-10-16-17-01-16",
+        "benchmark_name": (
+            "time_remote_file_reading.HDF5PyNWBFileReadBenchmark.time_read_hdf5_pynwb_fsspec_https_no_cache"
+        ),
+        "parameter_case_name": "OphysTestCase",
+    },
+    # Ophys file open took 97.6 s, whereas the other five runs took 6.3-7.3 s.
+    {
+        "machine_id": "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+        "timestamp": "2026-10-16-17-01-16",
+        "benchmark_name": (
+            "time_remote_file_reading.HDF5PyNWBFileReadBenchmark.time_read_hdf5_pynwb_fsspec_https_with_cache"
+        ),
+        "parameter_case_name": "OphysTestCase",
+    },
+    # Ophys file open took 6.77 s, whereas the other five runs took 0.83-2.89 s (median 0.93 s).
+    {
+        "machine_id": "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+        "timestamp": "2026-10-29-18-20-35",
+        "benchmark_name": (
+            "time_remote_file_reading.HDF5PyNWBRos3PreloadedFileReadBenchmark.time_read_hdf5_pynwb_ros3_preloaded_with_cache"
+        ),
+        "parameter_case_name": "OphysTestCase",
+    },
+]
 
 
 class BenchmarkDatabase:
@@ -104,6 +186,20 @@ class BenchmarkDatabase:
         )
         return self.split_camel_case(short_name).lower()
 
+    @staticmethod
+    def _excluded_sample_exprs() -> List[pl.Expr]:
+        """Build one expression per entry in EXCLUDED_SAMPLES that is true for rows belonging to that sample."""
+        sample_exprs = [
+            pl.all_horizontal(
+                pl.col("machine_id") == sample["machine_id"],
+                pl.col("timestamp") == pl.lit(sample["timestamp"]).str.to_datetime("%Y-%m-%d-%H-%M-%S"),
+                pl.col("benchmark_name") == sample["benchmark_name"],
+                pl.col("parameter_case_name") == sample["parameter_case_name"],
+            )
+            for sample in EXCLUDED_SAMPLES
+        ]
+        return sample_exprs
+
     def _preprocess_results(self, df: pl.LazyFrame) -> pl.DataFrame:
         """Apply all preprocessing transformations to the results dataframe."""
         print("Preprocessing benchmark results...")
@@ -137,6 +233,8 @@ class BenchmarkDatabase:
                 if self.environment_ids is not None
                 else pl.lit(True)
             )
+            # Drop samples flagged as invalid during review of the raw results
+            .filter(~pl.any_horizontal(pl.lit(False), *self._excluded_sample_exprs()))
             # Extract benchmark name components
             .with_columns(
                 [
