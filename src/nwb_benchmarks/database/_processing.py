@@ -35,6 +35,39 @@ ENVIRONMENT_TIMEPOINTS = {
     "2026-10-07": "42bfe7119727f6ab276361065e27b6e5fa5bbdc9",  # Python 3.13 environment, first run on 2026-10-07
 }
 
+# Individual benchmark samples flagged for removal during review of the raw results.
+# A sample is one benchmark test case within one results file, identified by the machine ID and timestamp from the
+# results filename plus the benchmark and parameter case names. All variables recorded for the sample are dropped,
+# while the remaining benchmarks of the same run are kept. The parquet `uuid` is per row, so it cannot identify a sample.
+EXCLUDED_SAMPLES = [
+    # Transient network stall. total_transfer_time_in_seconds was 138.0 s (network_total_time_in_seconds 138.2 s),
+    # whereas the other five runs of this case in the same environment took 7.8-10.2 s. The transferred bytes and
+    # packet counts match the other runs, so the slowdown reflects the network rather than the access method.
+    # Keeping it inflated the mean to 30.5 +/- 52.7 s.
+    {
+        "machine_id": "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+        "timestamp": "2026-10-18-13-02-38",
+        "benchmark_name": (
+            "network_tracking_remote_slicing."
+            "HDF5PyNWBFsspecHttpsPreloadedNoCacheContinuousSliceBenchmark.track_network_during_slice"
+        ),
+        "parameter_case_name": "OphysTestCase4",
+    },
+    # Failed packet capture. All packet, byte, and transfer-time metrics are 0 and mean_time_per_web_packet is NaN,
+    # which is impossible for an uncached remote HTTPS read. The 2026-11-01 repeat with the same commit, environment,
+    # and machine recorded 11,108,017 transferred bytes, consistent with the 10.3-11.2 MB of earlier runs.
+    # See https://github.com/NeurodataWithoutBorders/nwb-benchmarks-results/pull/11#discussion_r4448487419
+    {
+        "machine_id": "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+        "timestamp": "2026-10-30-23-20-18",
+        "benchmark_name": (
+            "network_tracking_remote_file_reading."
+            "HDF5H5pyFileReadBenchmark.track_network_read_hdf5_h5py_fsspec_https_no_cache"
+        ),
+        "parameter_case_name": "EcephysTestCase",
+    },
+]
+
 
 class BenchmarkDatabase:
     """Handles database preprocessing and loading for NWB benchmarks."""
@@ -104,6 +137,20 @@ class BenchmarkDatabase:
         )
         return self.split_camel_case(short_name).lower()
 
+    @staticmethod
+    def _excluded_sample_exprs() -> List[pl.Expr]:
+        """Build one expression per entry in EXCLUDED_SAMPLES that is true for rows belonging to that sample."""
+        sample_exprs = [
+            pl.all_horizontal(
+                pl.col("machine_id") == sample["machine_id"],
+                pl.col("timestamp") == pl.lit(sample["timestamp"]).str.to_datetime("%Y-%m-%d-%H-%M-%S"),
+                pl.col("benchmark_name") == sample["benchmark_name"],
+                pl.col("parameter_case_name") == sample["parameter_case_name"],
+            )
+            for sample in EXCLUDED_SAMPLES
+        ]
+        return sample_exprs
+
     def _preprocess_results(self, df: pl.LazyFrame) -> pl.DataFrame:
         """Apply all preprocessing transformations to the results dataframe."""
         print("Preprocessing benchmark results...")
@@ -137,6 +184,8 @@ class BenchmarkDatabase:
                 if self.environment_ids is not None
                 else pl.lit(True)
             )
+            # Drop samples flagged as invalid during review of the raw results
+            .filter(~pl.any_horizontal(pl.lit(False), *self._excluded_sample_exprs()))
             # Extract benchmark name components
             .with_columns(
                 [
