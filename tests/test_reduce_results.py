@@ -139,6 +139,7 @@ def test_database_reads_the_reduced_results(reduce, raw_results_info):
     incremental = data_frame.filter(data_frame["benchmark_name"] == INCREMENTAL)
     assert incremental["variable"].to_list() == ["cumulative_time_in_seconds"] * 3
     assert incremental["value"].to_list() == [0.5, 1.0, 1.5]
+    assert incremental["value_index"].to_list() == [0, 1, 2]
 
     network = data_frame.filter(data_frame["benchmark_name"] == NETWORK)
     mean_time_per_web_packet = network.filter(network["variable"] == "mean_time_per_web_packet")["value"].to_list()
