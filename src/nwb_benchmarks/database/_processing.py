@@ -23,9 +23,13 @@ PACKAGES_OF_INTEREST = [
 
 # The LBL Mac (official benchmark machine) received a new machine ID when the benchmark environment moved to
 # Python 3.13, because ASV's machine name and platform string changed. The hardware is identical.
+# It received a third machine ID for the 2026-11-03 incremental slicing run because psutil's total_swap_memory changed
+# from 0 to 1 GiB. macOS allocates swap dynamically, so this value is not a stable hardware property. All other
+# machine info, including CPU, RAM, and OS version, is identical.
 LBL_MAC_MACHINE_IDS = [
     "87fee773e425b4b1d3978fbf762d57effb0e8df8",
     "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+    "16b244cd5a970ac0d7fefcb46c6ab0476075e5b5",
 ]
 
 ENVIRONMENT_TIMEPOINTS = {
