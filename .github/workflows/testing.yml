@@ -33,6 +33,7 @@ jobs:
         with:
           activate-environment: nwb_benchmarks
           auto-activate-base: false
+          miniforge-version: latest
 
       # `$CONDA` is set by the runner image, but `${{ env.* }}` expressions only see variables written to GITHUB_ENV
       - name: Collect the conda environment cache key inputs

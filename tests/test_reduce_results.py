@@ -5,10 +5,7 @@ import pathlib
 import pytest
 
 from nwb_benchmarks.setup import _reduce_results
-from nwb_benchmarks.setup._reduce_results import (
-    reduce_results,
-    validate_environment_info_file,
-)
+from nwb_benchmarks.setup._reduce_results import reduce_results
 
 # Written by `asv run --record-samples` (as `nwb_benchmarks run` calls it) with asv 0.6.6 and asv-runner 0.3.1, the
 # versions the environment pins, trimmed to the keys the reducer reads. It holds one benchmark of each result shape:
@@ -46,12 +43,17 @@ def reduce(tmp_path, monkeypatch):
         monkeypatch.setattr(_reduce_results, name, directory)
     (tmp_path / "machines_dir" / "machine-test.json").write_text("{}")
 
-    raw_environment_info_file_path = tmp_path / "environment.txt"
+    raw_environment_info_file_path = tmp_path / "environment.json"
     raw_environment_info_file_path.write_text(
-        "# packages in environment at /conda/envs/nwb_benchmarks:\n"
-        "#\n"
-        "# Name                    Version                   Build  Channel\n"
-        "pynwb                     3.1.0                    pypi_0    pypi\n"
+        json.dumps(
+            dict(
+                interpreter=dict(executable="/python", prefix="/env", version="3.11.9"),
+                python_distributions=[dict(name="pynwb", version="3.1.0")],
+                conda=None,
+                runtime_versions=dict(),
+                capture_warnings=[],
+            )
+        )
     )
 
     def _reduce(raw_results_info: dict) -> pathlib.Path:
@@ -145,16 +147,3 @@ def test_database_reads_the_reduced_results(reduce, raw_results_info):
     timed = data_frame.filter(data_frame["benchmark_name"] == TIMED)
     assert timed["variable"].to_list() == ["time"]
     assert not math.isnan(timed["value"][0])
-
-
-def test_environment_without_pynwb_raises(tmp_path):
-    raw_environment_info_file_path = tmp_path / "environment.txt"
-    raw_environment_info_file_path.write_text(
-        "# packages in environment at /conda/envs/base:\n"
-        "#\n"
-        "# Name                    Version                   Build  Channel\n"
-        "numpy                     2.0.0                    pypi_0    pypi\n"
-    )
-
-    with pytest.raises(ValueError, match="does not list 'pynwb'"):
-        validate_environment_info_file(raw_environment_info_file_path=raw_environment_info_file_path)
