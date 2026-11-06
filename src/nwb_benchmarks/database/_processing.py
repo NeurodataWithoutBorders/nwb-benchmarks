@@ -66,6 +66,51 @@ EXCLUDED_SAMPLES = [
         ),
         "parameter_case_name": "EcephysTestCase",
     },
+    # The following remote file-open timing samples are isolated network stalls. Each is at least 5x the median of
+    # its benchmark and test case. The runs they belong to are otherwise normal (the median benchmark of each run is
+    # within 10% of its usual time), so only the affected sample is dropped. A smaller slowdown (about 3x) is kept as
+    # plausible network variance.
+    # Icephys file open took 76.2 s, whereas the other five runs took 3.2-4.5 s.
+    {
+        "machine_id": "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+        "timestamp": "2026-10-16-17-01-16",
+        "benchmark_name": ("time_remote_file_reading.HDF5H5pyFileReadBenchmark.time_read_hdf5_h5py_fsspec_s3_no_cache"),
+        "parameter_case_name": "IcephysTestCase",
+    },
+    # Ophys file open took 22.3 s, whereas the other five runs took 2.9-4.2 s.
+    {
+        "machine_id": "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+        "timestamp": "2026-10-13-14-34-49",
+        "benchmark_name": ("time_remote_file_reading.HDF5H5pyFileReadBenchmark.time_read_hdf5_h5py_fsspec_s3_no_cache"),
+        "parameter_case_name": "OphysTestCase",
+    },
+    # Ophys file open took 278.6 s, whereas the other five runs took 45.1-57.1 s.
+    {
+        "machine_id": "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+        "timestamp": "2026-10-16-17-01-16",
+        "benchmark_name": (
+            "time_remote_file_reading.HDF5PyNWBFileReadBenchmark.time_read_hdf5_pynwb_fsspec_https_no_cache"
+        ),
+        "parameter_case_name": "OphysTestCase",
+    },
+    # Ophys file open took 97.6 s, whereas the other five runs took 6.3-7.3 s.
+    {
+        "machine_id": "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+        "timestamp": "2026-10-16-17-01-16",
+        "benchmark_name": (
+            "time_remote_file_reading.HDF5PyNWBFileReadBenchmark.time_read_hdf5_pynwb_fsspec_https_with_cache"
+        ),
+        "parameter_case_name": "OphysTestCase",
+    },
+    # Ophys file open took 6.77 s, whereas the other five runs took 0.83-2.89 s (median 0.93 s).
+    {
+        "machine_id": "a853f2f47d9930a78fdcf0766673deebc3fcd14f",
+        "timestamp": "2026-10-29-18-20-35",
+        "benchmark_name": (
+            "time_remote_file_reading.HDF5PyNWBRos3PreloadedFileReadBenchmark.time_read_hdf5_pynwb_ros3_preloaded_with_cache"
+        ),
+        "parameter_case_name": "OphysTestCase",
+    },
 ]
 
 
