@@ -204,17 +204,21 @@ class Environment:
         with file_path.open(mode="r") as file_stream:
             data = json.load(fp=file_stream)
 
-        if len(data) > 1:
+        environment_id = file_path.stem.removeprefix("environment-")
+        runtime = data.get("runtime", {})  # Added to the legacy structure in database version 5.0.0
+        legacy_keys = [key for key in data if key != "runtime"]
+        if len(legacy_keys) != 1:
             return None
 
-        environment_id = file_path.stem.removeprefix("environment-")
-        preamble = next(iter(data.keys()))
-
+        preamble = legacy_keys[0]
         packages = {
             package["name"]: f'{package["version"]} ({package["build"]})'
             for package in data[preamble]
             if len(package) >= 3
         }
+        for distribution in runtime.get("python_distributions", []):
+            packages.setdefault(distribution["name"], distribution["version"])
+        packages.update({f"runtime_{name}": version for name, version in runtime.get("runtime_versions", {}).items()})
 
         if not any(packages):
             return None
