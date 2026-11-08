@@ -22,6 +22,7 @@ class Result:
     parameter_case: dict
     value: float
     variable: str
+    value_index: int
 
 
 @dataclasses.dataclass
@@ -96,11 +97,12 @@ class Results:
                 parameter_case=cls.parse_parameter_case(parameter_case),
                 value=value,
                 variable=variable_name,
+                value_index=value_index,
             )
             for benchmark_name, parameter_cases in data["results"].items()
             for parameter_case, benchmark_results in parameter_cases.items()
             for variable_name, values in cls.normalize_time_and_network_results(benchmark_results).items()
-            for value in values
+            for value_index, value in enumerate(values)
         ]
 
         return cls(results=results)
@@ -124,6 +126,7 @@ class Results:
             "parameter_case_slice_strategy": [result.parameter_case.get("slice_strategy") for result in self.results],
             "value": [result.value for result in self.results],
             "variable": [result.variable for result in self.results],
+            "value_index": [result.value_index for result in self.results],
         }
 
         data_frame = polars.DataFrame(data=data)
