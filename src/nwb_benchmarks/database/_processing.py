@@ -322,7 +322,7 @@ class BenchmarkDatabase:
             .filter(pl.col("package_version").is_not_null())
             .with_columns(
                 pl.col("environment_id")
-                .replace({v: k for k, v in ENVIRONMENT_TIMEPOINTS.items()}, default=None)
+                .replace_strict({v: k for k, v in ENVIRONMENT_TIMEPOINTS.items()}, default=None)
                 .alias("environment_timepoint")
             )
         )
