@@ -56,7 +56,8 @@ classifiers = [
 nwb_benchmarks = "nwb_benchmarks.command_line_interface:main"
 
 [dependency-groups]
-database = ["polars"]
+# The figure code uses arguments polars 2 removed (`Expr.replace(default=...)`).
+database = ["polars<2"]
 dev = ["ipython", "pre-commit"]
 figures = ["seaborn", "matplotlib", "pyarrow"]
 test = ["pytest", {include-group = "database"}, {include-group = "figures"}]
