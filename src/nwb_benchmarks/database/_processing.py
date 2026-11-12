@@ -39,6 +39,15 @@ ENVIRONMENT_TIMEPOINTS = {
     "2026-10-07": "42bfe7119727f6ab276361065e27b6e5fa5bbdc9",  # Python 3.13 environment, first run on 2026-10-07
 }
 
+# Environment IDs that describe the same installed packages as a canonical environment in ENVIRONMENT_TIMEPOINTS.
+# Results recorded under an alias ID are relabeled with the canonical ID during preprocessing.
+EQUIVALENT_ENVIRONMENT_IDS = {
+    # The environment file gained a `runtime` section in database version 5.0.0 (nwb_benchmarks #212), which changed
+    # the environment ID. Its conda package list is identical to 42bfe711, and the runtime versions match it.
+    # See https://github.com/NeurodataWithoutBorders/nwb-benchmarks-results/pull/14
+    "e833ef393e1bef9cf9915915b1604a87c7b004dc": "42bfe7119727f6ab276361065e27b6e5fa5bbdc9",
+}
+
 # Individual benchmark samples flagged for removal during review of the raw results.
 # A sample is one benchmark test case within one results file, identified by the machine ID and timestamp from the
 # results filename plus the benchmark and parameter case names. All variables recorded for the sample are dropped,
@@ -219,6 +228,7 @@ class BenchmarkDatabase:
             # Filter for specific machine early to reduce data volume
             .filter(pl.col("machine_id") == self.machine_id if self.machine_id is not None else pl.lit(True))
             .filter(pl.col("machine_id").is_in(self.machine_ids) if self.machine_ids is not None else pl.lit(True))
+            .with_columns(pl.col("environment_id").replace(EQUIVALENT_ENVIRONMENT_IDS))
             # Filter for timestamp early to reduce data volume
             .filter(
                 pl.col("timestamp") >= pl.lit(self.exclude_older).str.to_datetime()
