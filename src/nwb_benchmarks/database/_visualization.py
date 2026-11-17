@@ -2521,18 +2521,21 @@ class BenchmarkVisualizer:
         print(f"Plotting performance over time")
 
         df = db.filter_results_for_environment_timepoints()
-        df = (
-            df.filter(pl.col("benchmark_name_type") == benchmark_type)
-            .filter(pl.col("benchmark_name_clean").is_in(self.pynwb_read_order))
-            .collect()
-            .to_pandas()
+        df = df.filter(pl.col("benchmark_name_type") == benchmark_type).filter(
+            pl.col("benchmark_name_clean").is_in(self.pynwb_read_order)
         )
+        if benchmark_type == "time_remote_slicing":
+            # Pooling slice sizes mixes runtimes that differ several-fold; match Figure 3 by using the largest slice
+            df = df.filter(pl.col("slice_number") == 5)
+        df = df.collect().to_pandas()
 
         if df.empty:
             self._record_skipped_output(
                 "plot", self.output_directory / f"performance_over_{benchmark_type}.pdf", "No data available to plot."
             )
             return
+
+        self._write_performance_change_table(db=db, benchmark_type=benchmark_type)
 
         summary_group_cols = [
             "benchmark_name_type",
@@ -2583,11 +2586,86 @@ class BenchmarkVisualizer:
             "Note that the 2025-09-01 timepoint is an estimate for approximately when that environment was generated. "
             "The 2026-10-07 timepoint is the Python 3.13 environment, dated by its first benchmark run. "
         )
+        if benchmark_type == "time_remote_slicing":
+            caption += "Slicing results show the largest slice. "
         g.figure.text(0.5, -0.01, caption, ha="center", va="top", fontsize=9, wrap=True, style="italic")
 
         sns.despine()
         plt.savefig(self.output_directory / f"performance_over_{benchmark_type}.pdf", dpi=300, bbox_inches="tight")
         plt.close()
+
+    def _write_performance_change_table(self, *, db: BenchmarkDatabase, benchmark_type: str) -> None:
+        """Write a table of runtime and network changes between consecutive environment timepoints."""
+        if self.summary_tables_directory is None:
+            return
+
+        network_type = benchmark_type.replace("time_", "network_tracking_")
+        network_variables = {
+            "amount_downloaded_in_bytes": "downloaded_bytes",
+            "total_traffic_in_number_of_web_packets": "web_packets",
+        }
+        group_cols = ["environment_timepoint", "benchmark_name_clean", "modality"]
+        if benchmark_type == "time_remote_slicing":
+            group_cols.append("is_preloaded")
+
+        df = db.filter_results_for_environment_timepoints().filter(
+            pl.col("benchmark_name_type").is_in([benchmark_type, network_type])
+            & pl.col("benchmark_name_clean").is_in(self.pynwb_read_order)
+        )
+        if benchmark_type == "time_remote_slicing":
+            df = df.filter(pl.col("slice_number") == 5)
+        # Joining with environments repeats every sample once per tracked package
+        df = df.drop(["package_name", "package_version"]).unique().collect().to_pandas()
+
+        runtime = (
+            df[df["benchmark_name_type"].eq(benchmark_type)]
+            .groupby(group_cols, dropna=False)["value"]
+            .agg(n="count", mean_s="mean")
+            .reset_index()
+        )
+        network = df[df["benchmark_name_type"].eq(network_type) & df["variable"].isin(network_variables)]
+        network = (
+            network.groupby([*group_cols, "variable"], dropna=False)["value"]
+            .mean()
+            .unstack("variable")
+            .rename(columns=network_variables)
+            .reset_index()
+        )
+        per_environment = runtime.merge(network, on=group_cols, how="left")
+        if per_environment.empty:
+            self._record_skipped_output(
+                "summary table", f"performance_over_{benchmark_type}_changes.csv", "No data available."
+            )
+            return
+
+        timepoints = sorted(per_environment["environment_timepoint"].unique())
+        key_cols = [col for col in group_cols if col != "environment_timepoint"]
+        value_cols = [col for col in ["n", "mean_s", *network_variables.values()] if col in per_environment]
+        pairs = []
+        for from_timepoint, to_timepoint in zip(timepoints[:-1], timepoints[1:]):
+            from_df = per_environment[per_environment["environment_timepoint"].eq(from_timepoint)]
+            to_df = per_environment[per_environment["environment_timepoint"].eq(to_timepoint)]
+            pair = from_df[[*key_cols, *value_cols]].merge(
+                to_df[[*key_cols, *value_cols]], on=key_cols, suffixes=("_from", "_to")
+            )
+            pair.insert(0, "to_environment", to_timepoint)
+            pair.insert(0, "from_environment", from_timepoint)
+            pairs.append(pair)
+        changes = pd.concat(pairs, ignore_index=True)
+
+        changes["absolute_change_s"] = changes["mean_s_to"] - changes["mean_s_from"]
+        changes["percent_change"] = 100 * changes["absolute_change_s"] / changes["mean_s_from"]
+        changes["fold_change"] = changes["mean_s_to"] / changes["mean_s_from"]
+        for name in network_variables.values():
+            if f"{name}_from" in changes:
+                percent_change = 100 * (changes[f"{name}_to"] / changes[f"{name}_from"] - 1)
+                changes[f"{name}_percent_change"] = percent_change.replace([np.inf, -np.inf], np.nan)
+
+        # Sub-10 ms runtimes are reads served from cache, where large relative changes are negligible in practice
+        changes["below_10ms"] = changes[["mean_s_from", "mean_s_to"]].max(axis=1) < 0.01
+        changes["abs_log2_fold_change"] = np.abs(np.log2(changes["fold_change"]))
+        changes = changes.sort_values(["below_10ms", "abs_log2_fold_change"], ascending=[True, False])
+        changes.to_csv(self.summary_tables_directory / f"performance_over_{benchmark_type}_changes.csv", index=False)
 
     def _plot_environment_specific_figures(self, db: BenchmarkDatabase):
         """Generate all plots that should be scoped to one environment context."""
