@@ -2575,6 +2575,13 @@ class BenchmarkVisualizer:
             display_labels = dict(zip(method_order, self._display_method_labels(method_order)))
             for text in g._legend.texts:
                 text.set_text(display_labels.get(text.get_text(), text.get_text()))
+            g._legend.set_title("Method")
+        for facet_key, ax in g.axes_dict.items():
+            if benchmark_type == "time_remote_slicing":
+                is_preloaded, modality = facet_key
+                ax.set_title(f"{modality}, {'repeated read' if is_preloaded else 'first read'}")
+            else:
+                ax.set_title(facet_key)
         g.set(xlabel="Environment timepoint", ylabel="Time (s)")
 
         # Add figure caption
