@@ -2579,7 +2579,7 @@ class BenchmarkVisualizer:
         for facet_key, ax in g.axes_dict.items():
             if benchmark_type == "time_remote_slicing":
                 is_preloaded, modality = facet_key
-                ax.set_title(f"{modality}, {'repeated read' if is_preloaded else 'first read'}")
+                ax.set_title(f"{modality}, {'repeated slice read' if is_preloaded else 'first slice read'}")
             else:
                 ax.set_title(facet_key)
         g.set(xlabel="Environment timepoint", ylabel="Time (s)")
