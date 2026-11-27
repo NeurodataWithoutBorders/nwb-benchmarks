@@ -14,7 +14,7 @@ HDF5: https://dandiarchive.org/dandiset/000717
 
 Zarr: https://dandiarchive.org/dandiset/000719
 
-LINDI: https://gui-staging.dandiarchive.org/dandiset/213889
+LINDI: https://sandbox.dandiarchive.org/dandiset/213889
 
 
 
